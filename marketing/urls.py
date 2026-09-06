@@ -70,6 +70,7 @@ urlpatterns = [
     path('api/chat/rename/', views.api_rename_conversation, name='api_rename_conversation'),
     path('api/chat/delete/', views.api_delete_conversation, name='api_delete_conversation'),
     path('api/chat/submit/', views.api_submit_for_approval, name='api_submit_for_approval'),
+    path('api/chat/send-now/', views.api_send_now, name='api_send_now'),
 
     path('api/approvals/decide/', views.api_approval_decision, name='api_approval_decision'),
     path('api/approvals/bulk/', views.api_bulk_approval, name='api_bulk_approval'),

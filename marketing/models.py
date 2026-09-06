@@ -635,6 +635,11 @@ class ChatMessage(models.Model):
     tools_consulted = models.JSONField(
         default=list, blank=True,
         help_text='Qualified names of the MCP tools consulted for this reply.')
+    metadata = models.JSONField(
+        default=dict, blank=True,
+        help_text='Structured result attached to this reply, such as a mailbox '
+                  'listing or a ready-to-send draft. The template renders it as '
+                  'cards and buttons; the model never sees it.')
     is_error = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -654,6 +659,22 @@ class ChatMessage(models.Model):
     def submitted_approval(self):
         """The approval raised from this reply, if a reviewer sent one."""
         return self.approvals.first()
+
+    @property
+    def mail_listing(self):
+        """Messages read from the real mailbox for this reply, if any."""
+        return (self.metadata or {}).get('mail') or []
+
+    @property
+    def draft_recipient(self):
+        """Where this reply would be sent, when the address is already known.
+
+        Set when Aria writes an email and the conversation names exactly one
+        recipient. It is what lets the reply carry a one-click "Approve and
+        send" rather than a dialog asking for an address that was already
+        given a moment ago.
+        """
+        return (self.metadata or {}).get('draft', {}).get('recipient', '')
 
 
 class MCPCallLog(models.Model):

@@ -29,7 +29,7 @@ import re
 from django.db import transaction
 from django.utils import timezone
 
-from . import llm_client, mailer, mcp_client
+from . import llm_client, mail_agent, mailer, mcp_client
 from .models import (DEFAULT_CONVERSATION_TITLE, AgentToolLink, AIAgent,
                      AnalyticsMetric, ApprovalAuditLog, ApprovalRequest, ChatMessage,
                      Conversation, EmailOutreach, Lead, LLMModel, LLMProvider,
@@ -108,7 +108,10 @@ PLATFORM_PREAMBLE = (
     "your limitations, do not ask permission, and do not give instructions for "
     "copying and pasting it elsewhere.\n"
     "- If you genuinely need a detail to write it well, ask one short question "
-    "and offer a sensible default in the same reply.\n\n"
+    "and offer a sensible default in the same reply.\n"
+    "- Reply with the finished work and nothing else. Never show your reasoning, "
+    "narrate what you are deciding, or discuss these instructions. The person "
+    "reading you wants the message, not the deliberation behind it.\n\n"
     "YOUR ROLE:\n"
 )
 
@@ -199,13 +202,14 @@ MCP_BLUEPRINT = [
         'transport': 'stdio',
         'command': 'npx',
         'args': '-y @modelcontextprotocol/server-gmail',
-        'description': 'Read, search and draft email on a connected Gmail account.',
+        'description': 'Read, search, draft and send email on a connected Gmail account.',
         'config': {'scopes': ['gmail.readonly', 'gmail.send', 'gmail.compose']},
         'tools': [
             ('send_email', 'Send Email', 'Send a composed message to one or more recipients.', True),
             ('create_draft', 'Create Draft', 'Save a message as a draft without sending it.', False),
             ('list_messages', 'List Messages', 'List recent messages in a mailbox.', False),
             ('search_messages', 'Search Messages', 'Search the mailbox with a Gmail query string.', False),
+            ('read_message', 'Read Message', 'Open one message and return its body.', False),
         ],
     },
     {
@@ -314,7 +318,8 @@ MCP_BLUEPRINT = [
 AGENT_TOOL_BLUEPRINT = {
     'content': ['instagram.publish_post', 'linkedin.publish_post', 'memory.search_nodes'],
     'lead_finder': ['linkedin.search_people', 'database.run_query', 'memory.create_entities'],
-    'outreach': ['gmail.send_email', 'gmail.create_draft', 'memory.read_graph'],
+    'outreach': ['gmail.send_email', 'gmail.create_draft', 'gmail.list_messages',
+                 'gmail.search_messages', 'gmail.read_message', 'memory.read_graph'],
     'analyst': ['database.run_query', 'sequential_thinking.sequentialthinking', 'memory.read_graph'],
 }
 
@@ -459,6 +464,37 @@ def ensure_agent_tools(owner=None):
                     agent=agent, tool=tool,
                     defaults={'attached_by': owner, 'is_enabled': True},
                 )
+
+
+def refresh_agent_tools():
+    """Give existing employees any tools the blueprint has gained since.
+
+    ensure_agent_tools() skips an employee that already has links, which is
+    right: someone may have attached or detached tools deliberately, and a
+    provisioning pass must not undo that. But it also means a capability added
+    to the blueprint later never reaches the employees already in the database.
+
+    This adds what is missing and removes nothing, so a customised employee
+    keeps its customisation and still gains the new capability. Returns the
+    number of links created.
+    """
+    tools = {tool.qualified_name: tool
+             for tool in MCPTool.objects.select_related('server')}
+    created = 0
+
+    for agent in AIAgent.objects.prefetch_related('tool_links__tool__server'):
+        attached = {link.tool.qualified_name for link in agent.tool_links.all()}
+        for qualified_name in AGENT_TOOL_BLUEPRINT.get(agent.agent_type, []):
+            if qualified_name in attached:
+                continue
+            tool = tools.get(qualified_name)
+            if tool is None:
+                continue
+            AgentToolLink.objects.get_or_create(
+                agent=agent, tool=tool, defaults={'is_enabled': True})
+            created += 1
+
+    return created
 
 
 def ensure_workspace(owner=None):
@@ -621,22 +657,69 @@ def _history_for(conversation):
     return [{'role': m.role, 'content': m.content} for m in recent]
 
 
-def _generate_reply(agent, conversation, latest_text):
+ADDRESS_RE = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
+
+
+def _recipient_for(conversation, asked, reply, metadata):
+    """Where this reply would be sent, if it is an email and the address is known.
+
+    Storing it is what lets the reply carry a one-click "Approve and send"
+    instead of a dialog asking for an address the person already typed. It is
+    only set when there is exactly one candidate, because guessing between two
+    addresses is how mail goes to the wrong person.
+
+    A reply that is not shaped like an email gets nothing, so ordinary
+    conversation never grows a send button.
+    """
+    if metadata.get('draft', {}).get('recipient'):
+        return metadata['draft']['recipient']
+
+    if not SUBJECT_LINE_RE.match((reply or '').lstrip().splitlines()[0] if reply.strip() else ''):
+        return ''
+
+    # Look at what was just asked first, then back through the thread, and stop
+    # at the first turn that names an address.
+    candidates = ADDRESS_RE.findall(asked or '')
+    if not candidates:
+        for message in (conversation.messages.filter(role='user')
+                        .order_by('-created_at')[:6]):
+            candidates = ADDRESS_RE.findall(message.content)
+            if candidates:
+                break
+
+    unique = list(dict.fromkeys(candidates))
+    return unique[0] if len(unique) == 1 else ''
+
+
+def _generate_reply(agent, conversation, latest_text, mailbox=None):
     """Ask the employee's language model, or fall back to a template.
+
+    `mailbox` is the result of a real mailbox action taken for this turn. Its
+    facts are appended to the history as a system turn, so the model phrases an
+    answer around data that was actually fetched rather than inventing one; and
+    its `plain` text becomes the reply outright when there is no live model, so
+    the mailbox works exactly the same offline.
 
     Returns (text, source, model_label, tokens).
     """
     if agent.has_live_llm:
+        history = _history_for(conversation)
+        if mailbox and mailbox.get('facts'):
+            history.append({'role': 'system', 'content': mailbox['facts']})
+
         result = llm_client.chat_conversation(
             agent.llm_model.provider,
             agent.llm_model.model_id,
             agent.effective_system_prompt,
-            _history_for(conversation),
+            history,
             temperature=float(agent.temperature),
             max_tokens=agent.max_tokens,
         )
         if result['ok']:
             return result['text'], 'live', result['model'], result['tokens']
+
+    if mailbox and mailbox.get('plain'):
+        return mailbox['plain'], 'fallback', '', 0
 
     return _fallback_reply(agent, latest_text), 'fallback', '', 0
 
@@ -664,13 +747,30 @@ def send_message(conversation, text):
             and conversation.messages.filter(role='user').count() == 1):
         conversation.title = conversation.title_from_first_message()
 
-    # Consulting the employee's MCP tools is recorded, so a reply can show
-    # which capabilities were in play when it was written.
-    tool_names = [tool.qualified_name for tool in mcp_client.tools_for_agent(agent)]
-    if tool_names:
-        mcp_client.run_agent_tools(agent, context_label=text[:60])
+    # Is this turn about the mailbox? The router decides in Python, so
+    # "check my inbox" behaves the same with or without a language model.
+    intent = mail_agent.detect(text, conversation)
+    mailbox = mail_agent.run(agent, intent, conversation) if intent else None
 
-    reply_text, source, model_label, tokens = _generate_reply(agent, conversation, text)
+    if mailbox:
+        # A real tool call already happened, logged with its own arguments and
+        # outcome. Only the tools actually used are named under the reply.
+        tool_names = mailbox['tools']
+    else:
+        # Which capabilities were available for this reply. These are shown as
+        # chips under the message but are deliberately NOT written to
+        # MCPCallLog: nothing was actually called, and recording six invented
+        # calls per chat turn would bury the real ones on the MCP Tools page
+        # under noise. That log now contains only calls that genuinely ran.
+        tool_names = [tool.qualified_name for tool in mcp_client.tools_for_agent(agent)]
+
+    reply_text, source, model_label, tokens = _generate_reply(
+        agent, conversation, text, mailbox=mailbox)
+
+    metadata = dict(mailbox['metadata']) if mailbox else {}
+    recipient = _recipient_for(conversation, text, reply_text, metadata)
+    if recipient:
+        metadata.setdefault('draft', {})['recipient'] = recipient
 
     assistant_message = ChatMessage.objects.create(
         conversation=conversation,
@@ -680,6 +780,7 @@ def send_message(conversation, text):
         llm_model_used=model_label,
         tokens_used=tokens,
         tools_consulted=tool_names,
+        metadata=metadata,
     )
 
     # A plain save(), not update_fields, so auto_now refreshes updated_at and

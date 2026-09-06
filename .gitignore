@@ -1,0 +1,25 @@
+# Secrets. .env holds API keys and the mail password, so it must never be
+# committed. Share .env.example instead, which has the same keys and no values.
+.env
+
+# The database carries seeded demonstration data and any stored API keys.
+db.sqlite3
+db.sqlite3.backup-*
+db.sqlite3.before-*
+
+# Virtual environment
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Editors and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Collected static files, if collectstatic is ever run
+staticfiles/

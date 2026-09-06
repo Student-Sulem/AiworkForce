@@ -424,33 +424,106 @@ _THINK_HEADING_RE = re.compile(
 
 _BLANK_LINE_RE = re.compile(r'\n\s*\n')
 
+# A third form, and the one seen most often in practice: no marker at all, just
+# the model narrating its own deliberation. Two giveaways, neither of which a
+# reply addressed TO someone ever contains -- talking about "the user" in the
+# third person, and reasoning aloud about its own instructions.
+#
+# The verbs matter. Bare "the user" is left alone deliberately, because a
+# strategy employee may quite properly write about user acquisition or the user
+# journey; "the user is asking" is not something it would ever write.
+_MONOLOGUE_RE = re.compile(
+    # Talking about the person it is talking to, in the third person.
+    r"\bthe user (?:is|was|says|said|asked|asks|wants|meant|means|might"
+    r"|seems|expects|didn't|did not|probably)\b"
+    # Reasoning aloud about its own instructions.
+    r"|\bmy (?:role|instructions|brief|constraints|capabilities) (?:as|is|are|say)\b"
+    r"|\bper (?:my|the) (?:role|rules|brief|instructions)\b"
+    r"|\bthe (?:rules|brief|instructions) (?:say|says|forbid|state)\b"
+    r"|\bre-?reading the (?:constraints|rules|brief)\b"
+    # Planning its own next move rather than making it. A finished email or
+    # social post never narrates what it is about to do.
+    r"|\bso I(?:'ll| will| should)\b"
+    r"|\bmy planned (?:response|reply|answer)\b"
+    r"|\b(?:best|safer) (?:path|approach|option)\s*:"
+    r"|^\s*(?:alternative|solution|wait|hmm|ah)\b\s*[:!,.]"
+    r"|\bdouble-?checking\b"
+    r"|\blet me (?:unpack|re-?read)\b",
+    re.IGNORECASE | re.MULTILINE)
+
 # Below this, a trailing block is more likely to be a stray closing remark than
 # the actual answer, so the earlier split is preferred instead.
 _MIN_ANSWER_CHARS = 40
+
+# What is left after the working must also be a fair share of the whole reply.
+# A tail worth 4% of the output is where a model ran out of tokens mid-thought,
+# not where it answered.
+_MIN_ANSWER_SHARE = 0.15
 
 
 def strip_reasoning(text):
     """Remove a reasoning model's visible working from its answer.
 
-    A <think> block is an unambiguous marker and is always cut. A prose heading
-    is a heuristic: when the reply announces its own reasoning, the answer is
-    taken to be the final paragraph, falling back to everything after the
-    heading if that turns out to be too short to be the real answer.
+    Three forms are handled, in decreasing order of certainty:
+
+        <think>...</think>          an unambiguous marker; always cut
+        "Here's my thinking:"       the reply announces its own reasoning
+        "Okay, the user wants..."   no marker at all, just deliberation
+
+    Returning '' is a valid and deliberate outcome: it means the model produced
+    working and no answer. chat_completion() treats that as a failed call, so
+    the employee replies from its template and the chat is labelled "Template
+    reply". Publishing the reasoning, or an empty bubble, would both be worse.
     """
     # U+FFFD carries no meaning and only ever appears when something upstream
     # mangled a byte, so it is dropped rather than published.
     cleaned = _THINK_TAG_RE.sub('', text or '').replace('�', '').strip()
 
-    if not _THINK_HEADING_RE.match(cleaned):
-        return cleaned
-
     blocks = [block.strip() for block in _BLANK_LINE_RE.split(cleaned) if block.strip()]
-    if len(blocks) < 2:
+
+    if _THINK_HEADING_RE.match(cleaned):
+        if len(blocks) < 2:
+            return cleaned
+        if len(blocks[-1]) >= _MIN_ANSWER_CHARS:
+            return blocks[-1]
+        return '\n\n'.join(blocks[1:]).strip()
+
+    return _strip_monologue(blocks, cleaned)
+
+
+def _strip_monologue(blocks, cleaned):
+    """Handle a reply that opens by deliberating instead of answering.
+
+    An answer never begins with the model thinking about the request, so an
+    opening block of monologue means everything up to the last such block is
+    working, and whatever follows is the candidate answer.
+
+    That candidate has to earn the name twice over. It must be long enough to
+    be an answer at all, and it must be a fair share of what the model wrote:
+    a model that spends 95% of its budget deliberating and stops mid-sentence
+    has left a fragment, not a reply. The leak this was written for ended with
+    154 characters after 3,300 of working -- long enough to pass a length test
+    on its own, and still not an answer.
+
+    Returning '' is the honest outcome there, because the caller then falls
+    back to the template and the chat says "Template reply".
+    """
+    if not blocks or not _MONOLOGUE_RE.search(blocks[0]):
         return cleaned
 
-    if len(blocks[-1]) >= _MIN_ANSWER_CHARS:
-        return blocks[-1]
-    return '\n\n'.join(blocks[1:]).strip()
+    last_monologue = max(index for index, block in enumerate(blocks)
+                         if _MONOLOGUE_RE.search(block))
+    answer = blocks[last_monologue + 1:]
+
+    if not answer:
+        return ''
+
+    joined = '\n\n'.join(answer).strip()
+    if len(joined) < _MIN_ANSWER_CHARS:
+        return ''
+    if len(joined) < len(cleaned) * _MIN_ANSWER_SHARE:
+        return ''
+    return joined
 
 
 def chat_conversation(provider, model_id, system_prompt, history,

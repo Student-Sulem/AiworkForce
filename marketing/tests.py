@@ -4,7 +4,7 @@ Run them with:
 
     python manage.py test marketing
 
-Seventeen classes, grouped by what they prove:
+Twenty-two classes, grouped by what they prove:
 
     WorkspaceRoutingTests      the six pages exist, are protected, and the two
                                deleted pages really are gone
@@ -29,9 +29,16 @@ Seventeen classes, grouped by what they prove:
                                on each
     TimeoutBudgetTests         generation gets a longer budget than metadata
     ReasoningStripTests        a model's visible working never reaches a post
+    EnvFileTests               credentials survive closing the terminal
+    MailRouterTests            what a person types becomes a mailbox action
+    MailboxToolGateTests       the MCP tool record is what grants access
+    MailboxChatTests           a mailbox turn, end to end, with no network
+    SendNowTests               approve and send in one click, still audited
 """
 
+import io
 import os
+import tempfile
 import urllib.error
 from unittest import mock
 
@@ -41,17 +48,21 @@ import smtplib
 from django.contrib.auth.models import Group, User
 from django.core import mail
 from django.db import IntegrityError, transaction
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import NoReverseMatch, reverse
 
 from django.conf import settings
 from django.utils import timezone
 
-from . import agent_engine, llm_client, mailer, markdown as md, roles
+from marketpulse import env as env_file
+
+from . import (agent_engine, gmail_client, llm_client, mail_agent,
+               mailer, markdown as md, roles)
 from .forms import AIAgentForm, ApprovalDecisionForm
 from .models import (AIAgent, ApprovalAuditLog, ApprovalRequest, ChatMessage,
                      Conversation, EmailOutreach, Lead, LLMModel, LLMProvider,
-                     MCPServer, MCPTool, Profile, SocialPost)
+                     MCPCallLog, MCPServer, MCPTool, Profile, SocialPost)
 
 PAGE_NAMES = ['dashboard', 'agents', 'approvals', 'users', 'configurations', 'mcp_tools']
 
@@ -522,10 +533,21 @@ class ApiKeyResolutionTests(TestCase):
         self.nvidia = LLMProvider.objects.get(user=self.user, provider_key='nvidia')
         self.ollama = LLMProvider.objects.get(user=self.user, provider_key='ollama')
 
+    def _no_environment_key(self):
+        """Blank out NVIDIA_API_KEY for the duration of a test.
+
+        settings.py reads .env on start-up, so on a machine that has a real key
+        configured it is present in os.environ throughout the test run. A test
+        that means "no key anywhere" has to say so, rather than depending on
+        who is running it.
+        """
+        return mock.patch.dict(os.environ, {'NVIDIA_API_KEY': ''})
+
     def test_a_provider_with_no_key_anywhere_is_not_configured(self):
-        self.assertEqual(self.nvidia.key_source, 'none')
-        self.assertFalse(self.nvidia.is_configured)
-        self.assertEqual(self.nvidia.masked_key, 'Not set')
+        with self._no_environment_key():
+            self.assertEqual(self.nvidia.key_source, 'none')
+            self.assertFalse(self.nvidia.is_configured)
+            self.assertEqual(self.nvidia.masked_key, 'Not set')
 
     def test_ollama_needs_no_credential(self):
         self.assertFalse(self.ollama.requires_api_key)
@@ -568,7 +590,10 @@ class ApiKeyResolutionTests(TestCase):
         agent.llm_model = LLMModel.objects.filter(provider=self.nvidia).first()
         agent.save()
 
-        self.assertFalse(agent.has_live_llm)
+        with self._no_environment_key():
+            agent.refresh_from_db()
+            self.assertFalse(agent.has_live_llm)
+
         with mock.patch.dict(os.environ, {'NVIDIA_API_KEY': 'nvapi-from-the-environment'}):
             agent.refresh_from_db()
             self.assertTrue(agent.has_live_llm)
@@ -616,6 +641,73 @@ class ReasoningStripTests(TestCase):
         """Guards against mistaking a sign-off for the answer."""
         raw = 'Reasoning: weighing the options\n\nThe real answer is here.\n\nOK'
         self.assertIn('The real answer is here.', llm_client.strip_reasoning(raw))
+
+    # --- an unmarked monologue --------------------------------------------
+
+    LEAK = (
+        'Okay, the user is asking me to send an email "on my behalf" after I '
+        'already drafted one. Let me unpack this carefully.\n\n'
+        'First, recalling my role as Aria - I am strictly the outreach manager. '
+        'My job is only to write the email, not to send it.\n\n'
+        'Important constraints from the brief:\n'
+        '* Never claim I have sent anything\n'
+        '* If asked to send, just write it ready to go\n\n'
+        'Double-checking word count: my planned response is just referencing '
+        'the prior email.\n\n'
+        'Alternative: treat "send on my behalf" as a request to confirm the '
+        'email is ready. So I will output the same email again - because:\n\n'
+        '* It is still under'
+    )
+
+    def test_an_unmarked_monologue_is_suppressed_entirely(self):
+        """REGRESSION: Aria published 3,454 characters of deliberation --
+        including her own system prompt quoted back -- and ran out of tokens
+        before writing any answer. There was no <think> tag and no "Here is my
+        thinking process:" heading, so neither existing rule caught it.
+
+        Suppressing it returns '', which chat_completion() treats as a failed
+        call, so the employee answers from its template instead.
+        """
+        self.assertEqual(llm_client.strip_reasoning(self.LEAK), '')
+
+    def test_a_suppressed_reply_becomes_a_failed_call(self):
+        """The empty string has to travel: it is what makes the chat fall back
+        rather than showing an empty bubble."""
+        payload = {'choices': [{'message': {'content': self.LEAK}}],
+                   'usage': {'total_tokens': 1274}}
+        with mock.patch.object(llm_client, '_http_json', return_value=(200, payload)):
+            provider = LLMProvider(provider_key='nvidia', api_key='nvapi-x')
+            result = llm_client.chat_completion(
+                provider, 'nvidia/nemotron-3-super-120b-a12b', 'sys', 'hi')
+
+        self.assertFalse(result['ok'])
+        self.assertIn('empty', result['message'].lower())
+
+    def test_monologue_followed_by_a_real_answer_keeps_the_answer(self):
+        raw = ('Okay, the user is asking for an intro email. Let me unpack this.\n\n'
+               'Subject: Quick Hello\n\n'
+               'Hi Sulem,\n\nWould you be free for a short call next week?\n\nAria')
+        cleaned = llm_client.strip_reasoning(raw)
+
+        self.assertTrue(cleaned.startswith('Subject:'))
+        self.assertNotIn('the user is asking', cleaned)
+
+    def test_a_finished_email_is_never_touched(self):
+        raw = ('Subject: Quick Hello\n\nHi Sulem,\n\nI hope you are well. Would '
+               'you be free for a short call next week?\n\nThank you,\nAria')
+        self.assertEqual(llm_client.strip_reasoning(raw), raw)
+
+    def test_the_word_user_alone_is_not_treated_as_reasoning(self):
+        """A strategy employee writes about users for a living, so the detector
+        keys on "the user is asking", never on "the user"."""
+        raw = ('User acquisition cost rose 14% this quarter. The user journey now '
+               'takes six touches instead of four, which is where the budget went.')
+        self.assertEqual(llm_client.strip_reasoning(raw), raw)
+
+    def test_every_employee_is_told_not_to_show_its_working(self):
+        """The detector is the safety net; the prompt is the actual fix."""
+        self.assertIn('Never show your reasoning', agent_engine.PLATFORM_PREAMBLE)
+
 
 
 class SharedWorkspaceTests(TestCase):
@@ -1204,12 +1296,18 @@ class MarkdownRenderingTests(TestCase):
     # --- the two rendering paths agree ------------------------------------
 
     def test_the_endpoint_returns_the_same_html_as_the_page(self):
-        """One implementation, so a reply cannot look different in each path."""
+        """One implementation, so a reply cannot look different in each path.
+
+        The endpoint returns the whole bubble, rendered from the same
+        partials/_chat_message.html the page uses, rather than fields for the
+        browser to reassemble. Rebuilding the markup in JavaScript meant every
+        change had to be made twice; mail cards would have been the third.
+        """
         user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
         agent_engine.ensure_workspace_for_user(user)
         agent = AIAgent.objects.get(agent_type='content')
         conversation = agent_engine.start_conversation(user, agent)
-        _user_msg, reply = agent_engine.send_message(conversation, 'Draft a post.')
+        agent_engine.send_message(conversation, 'Draft a post.')
 
         self.client.force_login(user)
         response = self.client.post(
@@ -1218,13 +1316,20 @@ class MarkdownRenderingTests(TestCase):
             content_type='application/json')
         payload = response.json()
 
-        self.assertIn('content_html', payload['assistant_message'])
-        self.assertEqual(
-            payload['assistant_message']['content_html'],
-            str(md.render(payload['assistant_message']['content'])))
+        reply = ChatMessage.objects.filter(
+            conversation=conversation, role='assistant').latest('created_at')
+        expected = render_to_string('partials/_chat_message.html',
+                                    {'message': reply, 'agent': agent})
 
-        # A person's own message is never run through the renderer.
-        self.assertEqual(payload['user_message']['content_html'], '')
+        self.assertEqual(payload['assistant_message']['html'].strip(),
+                         expected.strip())
+
+        # The rendered Markdown is inside that HTML, produced by the one
+        # renderer, and the person's own text is never run through it.
+        self.assertIn(str(md.render(reply.content)),
+                      payload['assistant_message']['html'])
+        self.assertIn('msg--user', payload['user_message']['html'])
+        self.assertNotIn('msg__content--rich', payload['user_message']['html'])
 
     def test_a_typed_message_is_shown_verbatim(self):
         """Someone typing **stars** meant to type stars."""
@@ -1582,3 +1687,440 @@ class AgentPromptTests(TestCase):
     def test_refreshing_prompts_twice_changes_nothing(self):
         agent_engine.refresh_system_prompts()
         self.assertEqual(agent_engine.refresh_system_prompts(), 0)
+
+
+class EnvFileTests(TestCase):
+    """Configuration must survive closing the terminal.
+
+    REGRESSION: credentials were set with `$env:X = "y"`, which lives only as
+    long as that one PowerShell window. The next `runserver` therefore started
+    with nothing, the mail backend silently fell back to the console, and the
+    Configurations page reported "Console only" -- with no error anywhere to
+    explain why. A .env file is read on every start-up instead.
+    """
+
+    def _write(self, text):
+        handle = tempfile.NamedTemporaryFile(
+            'w', suffix='.env', delete=False, encoding='utf-8')
+        handle.write(text)
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return handle.name
+
+    def test_a_plain_assignment_is_loaded(self):
+        path = self._write('DEMO_PLAIN=hello\n')
+        self.addCleanup(os.environ.pop, 'DEMO_PLAIN', None)
+
+        self.assertEqual(env_file.load(path), 1)
+        self.assertEqual(os.environ['DEMO_PLAIN'], 'hello')
+
+    def test_quotes_spaces_comments_and_export_are_handled(self):
+        path = self._write(
+            '# a comment\n'
+            '\n'
+            'DEMO_QUOTED="quoted value"\n'
+            "DEMO_SINGLE='single'\n"
+            'DEMO_SPACED=xjjd kjfd uozz byfn\n'
+            'export DEMO_EXPORTED=exported\n'
+            'not-an-assignment\n')
+        for name in ['DEMO_QUOTED', 'DEMO_SINGLE', 'DEMO_SPACED', 'DEMO_EXPORTED']:
+            self.addCleanup(os.environ.pop, name, None)
+
+        self.assertEqual(env_file.load(path), 4)
+        self.assertEqual(os.environ['DEMO_QUOTED'], 'quoted value')
+        self.assertEqual(os.environ['DEMO_SINGLE'], 'single')
+        # A Gmail App Password is shown in four groups of four; the spaces are
+        # presentation only, and settings.py is what strips them.
+        self.assertEqual(os.environ['DEMO_SPACED'], 'xjjd kjfd uozz byfn')
+        self.assertEqual(os.environ['DEMO_EXPORTED'], 'exported')
+
+    def test_a_real_environment_variable_wins(self):
+        """The file is a default, not an override, so a server or CI can still
+        inject its own values without anyone editing it."""
+        path = self._write('DEMO_PRECEDENCE=from-file\n')
+        os.environ['DEMO_PRECEDENCE'] = 'from-shell'
+        self.addCleanup(os.environ.pop, 'DEMO_PRECEDENCE', None)
+
+        self.assertEqual(env_file.load(path), 0)
+        self.assertEqual(os.environ['DEMO_PRECEDENCE'], 'from-shell')
+
+    def test_a_missing_file_is_not_an_error(self):
+        """The project must still start on a machine that has no .env."""
+        self.assertEqual(env_file.load('no/such/.env'), 0)
+
+    def test_settings_reads_the_env_file_on_start_up(self):
+        source = io.open('marketpulse/settings.py', encoding='utf-8').read()
+        self.assertIn("env.load(BASE_DIR / '.env')", source)
+        # It must run before the settings that read os.environ, or it would
+        # load the values a moment too late to have any effect.
+        self.assertLess(source.index('env.load('), source.index('EMAIL_HOST_USER ='))
+
+    def test_the_env_file_is_never_committed(self):
+        entries = io.open('.gitignore', encoding='utf-8').read().split('\n')
+        self.assertIn('.env', entries)
+
+    def test_the_example_lists_every_variable_the_project_reads(self):
+        """.env.example is what a marker or a teammate copies, so a variable
+        missing from it is a variable nobody knows to set."""
+        example = io.open('.env.example', encoding='utf-8').read()
+        for name in ['NVIDIA_API_KEY', 'OPENROUTER_API_KEY',
+                     'EMAIL_HOST_USER', 'EMAIL_HOST_PASSWORD']:
+            with self.subTest(variable=name):
+                self.assertIn(name, example)
+
+
+class MailRouterTests(TestCase):
+    """What a person types has to become the right mailbox action.
+
+    The routing is done in Python rather than by asking the language model,
+    so that "check my inbox" works identically on a machine with no API key.
+    That choice is only defensible if the routing is actually good, which is
+    what these prove.
+    """
+
+    def assertAction(self, said, expected):
+        intent = mail_agent.detect(said)
+        actual = intent['action'] if intent else None
+        self.assertEqual(actual, expected, f'{said!r} -> {actual!r}')
+        return intent
+
+    def test_asking_for_new_mail_lists_only_unread(self):
+        for said in ['any new mail?', 'anything new?', 'do i have unread emails']:
+            with self.subTest(said=said):
+                self.assertTrue(self.assertAction(said, 'list')['unread_only'])
+
+    def test_asking_for_the_inbox_lists_everything(self):
+        for said in ['check my inbox', "what's in my inbox", 'list my recent messages']:
+            with self.subTest(said=said):
+                self.assertFalse(self.assertAction(said, 'list')['unread_only'])
+
+    def test_a_number_sets_how_many_are_shown(self):
+        self.assertEqual(self.assertAction('show my last 5 emails', 'list')['limit'], 5)
+
+    def test_searching_strips_the_filler_words(self):
+        """"find mail about the timetable" must search for the timetable, not
+        for "about the timetable"."""
+        cases = {
+            'anything from nvidia?': 'nvidia',
+            'search for invoices': 'invoices',
+            'find mail about the timetable': 'timetable',
+            'emails from indeed': 'indeed',
+        }
+        for said, expected in cases.items():
+            with self.subTest(said=said):
+                self.assertEqual(self.assertAction(said, 'search')['query'], expected)
+
+    def test_a_listing_can_be_referred_to_by_position(self):
+        cases = {'open 2': 2, 'read the third one': 3, 'show me number 1': 1,
+                 'open the last one': -1}
+        for said, expected in cases.items():
+            with self.subTest(said=said):
+                self.assertEqual(self.assertAction(said, 'open')['index'], expected)
+
+    def test_a_reply_carries_its_instruction(self):
+        intent = self.assertAction('reply to 2 saying thanks', 'reply')
+        self.assertEqual(intent['index'], 2)
+        self.assertEqual(intent['instruction'], 'thanks')
+
+    def test_pointing_words_are_not_mistaken_for_an_instruction(self):
+        """"reply to the first one" asks for a reply, and says nothing about
+        what it should contain. The trailing "one" belongs to the reference."""
+        self.assertEqual(
+            self.assertAction('reply to the first one', 'reply')['instruction'], '')
+
+    def test_an_explicit_address_is_left_to_the_composing_path(self):
+        """Writing to someone is not a mailbox query, and must not be
+        hijacked into a search for their address."""
+        self.assertIsNone(mail_agent.detect(
+            'send email to sam@example.com about pricing'))
+
+    def test_ordinary_conversation_is_left_alone(self):
+        for said in ['hello', 'what can you do?', 'write a linkedin post about AI']:
+            with self.subTest(said=said):
+                self.assertIsNone(mail_agent.detect(said))
+
+    def test_a_number_inside_a_sentence_is_not_a_reference(self):
+        """REGRESSION: "read 2 articles about marketing" opened message 2.
+
+        It starts with a verb and a number exactly like "read 2" does. What
+        separates them is the tail: a reference is finished once the number is
+        given, and this one carries the noun the number was counting.
+        """
+        self.assertIsNone(mail_agent.detect(
+            'read 2 articles about marketing and summarise them for me'))
+
+
+class MailboxToolGateTests(TestCase):
+    """The MCP tool record is what grants access, not the code.
+
+    This is what makes modelling MCP worth doing: switching the Gmail server
+    off on the MCP Tools page has to actually take the capability away.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
+        agent_engine.ensure_workspace_for_user(self.user)
+        agent_engine.refresh_agent_tools()
+        self.aria = AIAgent.objects.get(agent_type='outreach')
+
+    def test_aria_has_the_reading_tools(self):
+        attached = {tool.qualified_name for tool in self.aria.mcp_tools.all()}
+        for name in ['gmail.list_messages', 'gmail.search_messages',
+                     'gmail.read_message', 'gmail.create_draft', 'gmail.send_email']:
+            with self.subTest(tool=name):
+                self.assertIn(name, attached)
+
+    def test_nothing_is_withheld_while_the_tools_are_attached(self):
+        self.assertEqual(mail_agent.withheld(self.aria, 'gmail.list_messages'), '')
+
+    def test_disabling_the_server_withdraws_the_capability(self):
+        server = MCPServer.objects.get(server_key='gmail')
+        server.is_enabled = False
+        server.save(update_fields=['is_enabled'])
+
+        reason = mail_agent.withheld(self.aria, 'gmail.list_messages')
+        self.assertIn('switched off', reason)
+
+    def test_disabling_one_tool_withdraws_only_that_one(self):
+        tool = MCPTool.objects.get(server__server_key='gmail', tool_name='search_messages')
+        tool.is_enabled = False
+        tool.save(update_fields=['is_enabled'])
+
+        self.assertIn('disabled', mail_agent.withheld(self.aria, 'gmail.search_messages'))
+        self.assertEqual(mail_agent.withheld(self.aria, 'gmail.list_messages'), '')
+
+    def test_an_employee_without_the_tool_cannot_read_mail(self):
+        sophia = AIAgent.objects.get(agent_type='content')
+        self.assertIn('does not have', mail_agent.withheld(sophia, 'gmail.list_messages'))
+
+    def test_a_withheld_action_never_touches_the_mailbox(self):
+        """The refusal must come before the network call, not after it."""
+        server = MCPServer.objects.get(server_key='gmail')
+        server.is_enabled = False
+        server.save(update_fields=['is_enabled'])
+
+        with mock.patch.object(gmail_client, 'list_messages') as reader:
+            result = mail_agent.run(self.aria, {'action': 'list'}, None)
+
+        reader.assert_not_called()
+        self.assertIn('switched off', result['facts'])
+
+    def test_refreshing_tools_is_additive_and_idempotent(self):
+        """A person may have detached a tool deliberately; a provisioning pass
+        must add what is missing without undoing that."""
+        link = self.aria.tool_links.first()
+        link.delete()
+
+        self.assertGreaterEqual(agent_engine.refresh_agent_tools(), 1)
+        self.assertEqual(agent_engine.refresh_agent_tools(), 0)
+
+
+class MailboxChatTests(TestCase):
+    """A mailbox turn, end to end, with the network stubbed out."""
+
+    INBOX = {
+        'ok': True,
+        'count': 2,
+        'total': 2,
+        'message': '2 unread messages in INBOX; showing 2.',
+        'messages': [
+            {'uid': '101', 'sender': 'Google <no-reply@google.com>',
+             'sender_email': 'no-reply@google.com', 'to': '', 'subject': 'Security alert',
+             'message_id': '<a@x>', 'date': '2026-09-06T22:48:00+00:00',
+             'date_display': '06 Sep 2026 at 22:48', 'is_unread': True,
+             'snippet': 'App password created.', 'body': 'App password created.'},
+            {'uid': '100', 'sender': 'Indeed <no-reply@indeed.com>',
+             'sender_email': 'no-reply@indeed.com', 'to': '', 'subject': 'Jobs for you',
+             'message_id': '<b@x>', 'date': '2026-09-06T22:24:00+00:00',
+             'date_display': '06 Sep 2026 at 22:24', 'is_unread': True,
+             'snippet': 'Roles near you.', 'body': 'Roles near you.'},
+        ],
+    }
+
+    def setUp(self):
+        self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
+        agent_engine.ensure_workspace_for_user(self.user)
+        agent_engine.refresh_agent_tools()
+        self.aria = AIAgent.objects.get(agent_type='outreach')
+        self.conversation = agent_engine.start_conversation(self.user, self.aria)
+
+    def test_asking_for_mail_reads_the_mailbox_and_stores_the_result(self):
+        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
+            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
+
+        self.assertEqual(len(reply.mail_listing), 2)
+        self.assertEqual(reply.mail_listing[0]['subject'], 'Security alert')
+        self.assertIn('gmail.list_messages', reply.tools_consulted)
+
+    def test_the_mailbox_works_with_no_language_model(self):
+        """Every feature of this project works offline, the mailbox included."""
+        self.assertFalse(self.aria.has_live_llm)
+
+        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
+            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
+
+        self.assertEqual(reply.generation_source, 'fallback')
+        self.assertIn('2 unread', reply.content)
+        self.assertEqual(len(reply.mail_listing), 2)
+
+    def test_the_call_is_logged_against_the_mcp_tool(self):
+        before = MCPCallLog.objects.count()
+        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
+            agent_engine.send_message(self.conversation, 'any new mail?')
+
+        self.assertEqual(MCPCallLog.objects.count(), before + 1)
+        log = MCPCallLog.objects.latest('called_at')
+        self.assertEqual(log.tool.qualified_name, 'gmail.list_messages')
+        self.assertEqual(log.outcome, 'ok')
+
+    def test_an_ordinary_turn_logs_no_tool_calls(self):
+        """REGRESSION: every chat turn used to write one MCPCallLog row per
+        attached tool, so six invented calls buried the real ones."""
+        before = MCPCallLog.objects.count()
+        agent_engine.send_message(self.conversation, 'hello')
+        self.assertEqual(MCPCallLog.objects.count(), before)
+
+    def test_a_position_resolves_against_the_last_listing(self):
+        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
+            agent_engine.send_message(self.conversation, 'any new mail?')
+
+        opened = {'ok': True, 'messages': [self.INBOX['messages'][1]],
+                  'count': 1, 'mail': self.INBOX['messages'][1],
+                  'message': 'Opened it.'}
+        with mock.patch.object(gmail_client, 'get_message', return_value=opened) as reader:
+            _sent, reply = agent_engine.send_message(self.conversation, 'open 2')
+
+        # The second card in the listing, not the second message by uid.
+        reader.assert_called_once_with('100')
+        self.assertEqual(reply.metadata.get('opened'), '100')
+
+    def test_a_reference_with_no_listing_asks_rather_than_guessing(self):
+        _sent, reply = agent_engine.send_message(self.conversation, 'open 2')
+        self.assertIn('check your inbox', reply.content.lower())
+        self.assertEqual(reply.mail_listing, [])
+
+    def test_replying_to_a_message_knows_where_it_goes(self):
+        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
+            agent_engine.send_message(self.conversation, 'any new mail?')
+
+        opened = {'ok': True, 'messages': [self.INBOX['messages'][0]],
+                  'count': 1, 'mail': self.INBOX['messages'][0],
+                  'message': 'Opened it.'}
+        with mock.patch.object(gmail_client, 'get_message', return_value=opened):
+            _sent, reply = agent_engine.send_message(
+                self.conversation, 'reply to 1 saying thanks')
+
+        self.assertEqual(reply.draft_recipient, 'no-reply@google.com')
+
+    def test_naming_an_address_makes_the_reply_sendable(self):
+        _sent, reply = agent_engine.send_message(
+            self.conversation, 'send an email to sam@example.com about pricing')
+        self.assertEqual(reply.draft_recipient, 'sam@example.com')
+
+    def test_two_addresses_are_not_guessed_between(self):
+        """Guessing which of two addresses was meant is how mail reaches the
+        wrong person, so neither is used and the dialog is shown instead."""
+        _sent, reply = agent_engine.send_message(
+            self.conversation, 'email a@example.com and b@example.com about pricing')
+        self.assertEqual(reply.draft_recipient, '')
+
+    def test_ordinary_conversation_never_grows_a_send_button(self):
+        _sent, reply = agent_engine.send_message(self.conversation, 'hello there')
+        self.assertEqual(reply.draft_recipient, '')
+
+    def test_a_mailbox_failure_is_reported_not_raised(self):
+        broken = {'ok': False, 'messages': [], 'count': 0,
+                  'message': 'The mail server did not answer within 20 seconds.'}
+        with mock.patch.object(gmail_client, 'list_messages', return_value=broken):
+            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
+
+        self.assertIn('did not answer', reply.content)
+        self.assertEqual(reply.mail_listing, [])
+
+
+class SendNowTests(TestCase):
+    """Approve and send in one click, without losing the audit trail."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('owner', 'o@example.com', 'pw-owner-1234')
+        self.user.profile.role = 'owner'
+        self.user.profile.save()
+        agent_engine.ensure_workspace_for_user(self.user)
+
+        self.aria = AIAgent.objects.get(agent_type='outreach')
+        self.conversation = agent_engine.start_conversation(self.user, self.aria)
+        _sent, self.reply = agent_engine.send_message(
+            self.conversation, 'send an email to sam@example.com about pricing')
+        self.client.force_login(self.user)
+
+    def _post(self, **overrides):
+        payload = {'message_id': self.reply.pk}
+        payload.update(overrides)
+        return self.client.post(reverse('api_send_now'), payload,
+                                content_type='application/json')
+
+    def test_one_click_sends_the_email(self):
+        response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'success')
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['sam@example.com'])
+
+    def test_the_approval_record_is_still_written(self):
+        """Nothing is skipped: the queue stays a complete record of everything
+        that was ever sent."""
+        self._post()
+
+        approval = ApprovalRequest.objects.get(source_message=self.reply)
+        self.assertEqual(approval.status, 'approved')
+        self.assertEqual(approval.decided_by, self.user)
+        self.assertEqual(
+            set(approval.audit_entries.values_list('action', flat=True)),
+            {'created', 'approved'})
+
+    def test_the_reply_comes_back_re_rendered(self):
+        """So the button becomes the "Sent to" badge without a page reload,
+        and the browser cannot disagree with the server about what happened."""
+        html = self._post().json()['html']
+        self.assertIn('Sent to sam@example.com', html)
+        self.assertNotIn('data-send-now', html)
+
+    def test_a_reply_cannot_be_sent_twice(self):
+        self.assertEqual(self._post().json()['status'], 'success')
+        second = self._post()
+        self.assertEqual(second.json()['status'], 'error')
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_malformed_address_is_refused(self):
+        response = self._post(recipient_email='not-an-address')
+        self.assertEqual(response.json()['status'], 'error')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_someone_who_cannot_approve_cannot_send(self):
+        """The one-click route performs both actions, so it needs both
+        permissions. An analyst may submit, but not decide."""
+        analyst = User.objects.create_user('ana', 'ana@example.com', 'pw-ana-12345')
+        analyst.profile.role = 'analyst'
+        analyst.profile.save()
+
+        self.client.force_login(analyst)
+        conversation = agent_engine.start_conversation(analyst, self.aria)
+        _sent, reply = agent_engine.send_message(
+            conversation, 'send an email to sam@example.com about pricing')
+
+        response = self.client.post(
+            reverse('api_send_now'), {'message_id': reply.pk},
+            content_type='application/json')
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_another_persons_conversation_is_not_reachable(self):
+        intruder = User.objects.create_user('mal', 'm@example.com', 'pw-mal-12345')
+        intruder.profile.role = 'owner'
+        intruder.profile.save()
+
+        self.client.force_login(intruder)
+        self.assertEqual(self._post().status_code, 404)
+        self.assertEqual(len(mail.outbox), 0)

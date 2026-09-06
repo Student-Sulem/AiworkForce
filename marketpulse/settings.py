@@ -13,8 +13,22 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+from . import env
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Read BASE_DIR/.env into os.environ before any setting below is evaluated.
+#
+# A variable set with `$env:X = "y"` in PowerShell lives only as long as that
+# one terminal window, so the next `manage.py runserver` would start with
+# nothing and the site would quietly fall back to its offline behaviour --
+# mail printed to the console instead of sent. The file is read on every
+# start-up, however the server is launched.
+#
+# A real environment variable always wins over the file, and .env is listed in
+# .gitignore so nothing secret is committed. See marketpulse/env.py.
+env.load(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -132,12 +146,19 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 #
 # Approving an outreach email in the Approvals queue actually sends it. The
 # credentials come from the environment, never from settings.py or the
-# database, so a real mailbox password is not committed to version control:
+# database, so a real mailbox password is not committed to version control.
+#
+# Put them in a .env file at the project root -- copy .env.example and fill it
+# in -- so they survive closing the terminal:
+#
+#     EMAIL_HOST_USER=you@gmail.com
+#     EMAIL_HOST_PASSWORD=your-app-password
+#
+# A real environment variable still overrides the file, which is how a server
+# or CI would supply them instead:
 #
 #     PowerShell:  $env:EMAIL_HOST_USER = "you@gmail.com"
-#                  $env:EMAIL_HOST_PASSWORD = "your-app-password"
 #     Bash:        export EMAIL_HOST_USER="you@gmail.com"
-#                  export EMAIL_HOST_PASSWORD="your-app-password"
 #
 # For Gmail this must be an App Password, not the account password, and the
 # account needs two-step verification enabled:

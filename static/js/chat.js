@@ -39,65 +39,39 @@
       log.scrollTop = log.scrollHeight;
     }
 
-    /* Build the same markup as partials/_chat_message.html, so a reply looks
-       identical whether Django rendered it or this function did.
+    /* The whole bubble is rendered by Django, using the same
+       partials/_chat_message.html the page itself uses, and inserted here
+       as-is.
 
-       Markdown is NOT parsed here. The endpoint returns `content_html`,
-       already rendered and escaped by marketing/markdown.py, so there is one
-       implementation of both the formatting and the safety argument. */
-    function renderMessage(message, agent) {
+       This used to rebuild the markup in JavaScript, which meant every change
+       had to be made twice and the two drifted apart. It also means the mail
+       cards, the source badge and the send button need no JavaScript at all --
+       they arrive already rendered, already escaped by the template engine. */
+    function renderMessage(message) {
+      var holder = document.createElement('div');
+      holder.innerHTML = (message.html || '').trim();
+      return holder.firstElementChild;
+    }
+
+    /* The one bubble the server cannot have rendered: the person's own message,
+       shown the instant they press send so typing feels responsive, before any
+       round trip has happened. It is replaced by the stored version as soon as
+       the reply arrives.
+
+       The text is set with textContent, never innerHTML -- what someone types
+       is text, and must never be parsed as markup. */
+    function renderPending(text, agent) {
       var article = document.createElement('article');
-      article.className = 'msg msg--' + message.role;
-      article.dataset.messageId = message.id;
-
-      var isAssistant = message.role === 'assistant';
-      var avatarStyle = isAssistant ? ' style="background:' + agent.color + '"' : '';
-      var icon = isAssistant ? agent.icon : 'fa-user';
-
-      var meta = '';
-      var actions = '';
-      if (isAssistant) {
-        var sourceBadge = message.source === 'live'
-          ? '<span class="badge badge--success"><i class="fa-solid fa-bolt"></i> Live model</span>'
-          : '<span class="badge badge--neutral"><i class="fa-solid fa-file-lines"></i> Template reply</span>';
-        var modelChip = message.model
-          ? '<span class="chip chip--mono">' + App.escapeHtml(message.model) + '</span>' : '';
-        var tokenNote = message.tokens
-          ? '<span class="u-text-xs u-text-subtle">' + message.tokens + ' tokens</span>' : '';
-        var toolChips = (message.tools || []).map(function (t) {
-          return '<span class="chip chip--mono">' + App.escapeHtml(t) + '</span>';
-        }).join('');
-
-        meta = '<div class="msg__meta">' + sourceBadge + modelChip + tokenNote + toolChips + '</div>';
-        actions =
-          '<div class="msg__actions">' +
-          '<button class="btn btn--secondary btn--sm" type="button" data-submit-message="' +
-          message.id + '"><i class="fa-solid fa-clipboard-check"></i> Send for approval</button>' +
-          '<button class="btn btn--ghost btn--sm" type="button" data-copy-message="' +
-          message.id + '"><i class="fa-regular fa-copy"></i> Copy</button>' +
-          '</div>';
-      }
-
-      var contentClass = isAssistant ? 'msg__content msg__content--rich' : 'msg__content';
-
+      article.className = 'msg msg--user';
+      article.dataset.messageId = 'pending';
       article.innerHTML =
-        '<span class="msg__avatar"' + avatarStyle + '><i class="fa-solid ' + icon + '"></i></span>' +
-        '<div class="msg__body">' +
-        '<p class="msg__who u-m-0">' + (isAssistant ? App.escapeHtml(agent.name) : 'You') +
-        '<span class="msg__time">' + App.escapeHtml(message.created_at) + '</span></p>' +
-        '<div class="' + contentClass + '"></div>' + meta + actions +
-        '</div>';
-
-      var body = article.querySelector('.msg__content');
-      if (isAssistant && message.content_html) {
-        // Safe: the server escaped the model's text before generating any tag.
-        body.innerHTML = message.content_html;
-      } else {
-        // What the person typed is inserted as text, never parsed as markup.
-        body.textContent = message.content;
-      }
+        '<span class="msg__avatar"><i class="fa-solid fa-user"></i></span>' +
+        '<div class="msg__body"><p class="msg__who u-m-0">You</p>' +
+        '<div class="msg__content"></div></div>';
+      article.querySelector('.msg__content').textContent = text;
       return article;
     }
+
 
     function agentIdentity() {
       var avatar = document.querySelector('.chat__header .avatar');
@@ -142,10 +116,7 @@
       // Shown immediately so typing feels responsive. The timestamp is a
       // placeholder: the server's is authoritative and replaces it below,
       // which also stops the browser clock and the server clock disagreeing.
-      var pending = renderMessage({
-        id: 'pending', role: 'user', content: text,
-        created_at: ''
-      }, agent);
+      var pending = renderPending(text, agent);
       log.appendChild(pending);
       scrollToBottom();
 
@@ -161,8 +132,8 @@
           hideTyping();
           // Swap the optimistic bubble for the stored one, so its id and
           // timestamp match the database.
-          pending.replaceWith(renderMessage(result.user_message, agent));
-          log.appendChild(renderMessage(result.assistant_message, agent));
+          pending.replaceWith(renderMessage(result.user_message));
+          log.appendChild(renderMessage(result.assistant_message));
           scrollToBottom();
 
           var title = document.getElementById('chatTitle');
@@ -251,6 +222,54 @@
     }
 
     /* --- Copy --------------------------------------------------------------- */
+
+    /* A mail card's Open / Reply button simply types the phrase the router
+       already understands, so the buttons and the typing are the same feature
+       rather than two parallel ones. */
+    App.on('click', '[data-mail-say]', function () {
+      var box = document.getElementById('chatInput');
+      if (!box) { return; }
+      box.value = this.dataset.mailSay;
+      var form = box.closest('form');
+      if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); }
+    });
+
+    /* Approve and send, in one click, without leaving the conversation. */
+    App.on('click', '[data-send-now]', function () {
+      var button = this;
+      var article = button.closest('.msg');
+      var recipient = button.dataset.recipient || '';
+
+      if (!window.confirm('Send this email to ' + recipient + ' now?')) { return; }
+
+      button.disabled = true;
+      button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+
+      App.postJSON('/api/chat/send-now/', {
+        message_id: button.dataset.sendNow,
+        recipient_email: recipient
+      }).then(function (data) {
+        /* The server returns the re-rendered bubble, so the button becomes the
+           "Sent to ..." badge without the page reloading or the browser and
+           the server disagreeing about what happened. */
+        if (data.html && article) {
+          var holder = document.createElement('div');
+          holder.innerHTML = data.html.trim();
+          article.replaceWith(holder.firstElementChild);
+        }
+        App.toast(data.message, data.status === 'success' ? 'success' : 'warning');
+
+        var badge = document.getElementById('navPendingBadge');
+        if (badge && typeof data.pending_count === 'number') {
+          badge.textContent = data.pending_count;
+          badge.hidden = data.pending_count === 0;
+        }
+      }).catch(function (error) {
+        button.disabled = false;
+        button.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Approve and send to ' + recipient;
+        App.toast(error.message || 'The email could not be sent.', 'danger');
+      });
+    });
 
     App.on('click', '[data-copy-message]', function () {
       var article = this.closest('.msg');

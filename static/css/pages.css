@@ -320,6 +320,159 @@
   .msg__actions { opacity: 1; }
 }
 
+/* Sending is the point of the reply, not an afterthought, so this one action
+   does not wait for a hover the way Copy and Send-for-approval do. A primary
+   button nobody can see is a primary button nobody presses. */
+.msg__actions:has([data-send-now]) { opacity: 1; }
+
+/* The label carries the recipient's address, which is the whole point of it --
+   you should not have to press it to find out where the mail is going. A long
+   address is therefore allowed to wrap onto a second line rather than widen
+   the button past the phone it is being read on. */
+.msg__actions .btn { max-width: 100%; }
+[data-send-now] {
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+
+/* --- Messages read from the real mailbox ------------------------------------
+   Rendered by partials/_mail_list.html from marketing/gmail_client.py. The
+   numbering is load-bearing: it is what the person types back ("open 2"), so
+   it has to be as visible as the subject line.
+   --------------------------------------------------------------------------*/
+
+.maillist {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.maillist__item {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface);
+}
+
+.maillist__item--unread { border-left: 3px solid var(--color-primary); }
+
+.maillist__index {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-full);
+  background: var(--color-surface-3);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* min-width: 0 lets a long subject line ellipsis instead of forcing the flex
+   row wider than the chat column. Without it the whole thread scrolls
+   sideways whenever a marketing subject arrives. */
+.maillist__main { flex: 1 1 auto; min-width: 0; }
+
+.maillist__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+/* min-width: 0 is what makes the ellipsis work. A flex item's default
+   min-width is auto, which refuses to shrink below its content, so without
+   this the sender name pushes the whole chat log 70px wider than the phone
+   and the thread scrolls sideways. text-overflow alone cannot fix that. */
+.maillist__from {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maillist__date {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.maillist__subject {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maillist__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: var(--sp-1);
+  border-radius: var(--r-full);
+  background: var(--color-primary);
+  vertical-align: middle;
+}
+
+.maillist__snippet {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* An opened message shows its whole body, which can be long, so it scrolls
+   inside its own box rather than pushing the composer off screen. */
+.maillist__body {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.maillist__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+}
+
+@media (max-width: 560px) {
+  /* align-items must go back to stretch here. The row layout above uses
+     baseline so the date sits on the sender's line; but once the direction is
+     column, baseline becomes a CROSS-axis rule and shrink-wraps each child to
+     its own content width -- which lets the nowrap sender name grow past the
+     card and scroll the whole thread sideways on a phone. */
+  .maillist__top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .maillist__item { padding: var(--sp-2); }
+}
+
 
 /* --- Rendered Markdown inside a reply ---------------------------------------
    Produced by marketing/markdown.py, whose tag set is fixed and small, so each

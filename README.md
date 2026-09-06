@@ -29,42 +29,132 @@ in as each in turn.
 | `viewer` | `Viewer12345` | Viewer | Read everything. Cannot chat, submit or approve. |
 | `demo` | `demo12345` | Manager | A second Manager, useful for showing two people in the same shared workspace. |
 
-Run the tests with `venv\Scripts\python.exe manage.py test marketing` (133 tests).
+Run the tests with `venv\Scripts\python.exe manage.py test marketing` (193 tests).
+
+### Configuration: the `.env` file
+
+Credentials live in a file called `.env` at the project root. It is read on
+every start-up by `marketpulse/env.py`, which `settings.py` calls before any
+setting is evaluated, so the configuration survives closing the terminal.
+
+```
+cp .env.example .env
+```
+
+Then fill in the values you have. Every one is optional; the application runs
+with an empty file and says plainly which features are offline.
+
+| Variable | Effect when set |
+|---|---|
+| `NVIDIA_API_KEY` | Employees generate real replies through NVIDIA NIM |
+| `OPENROUTER_API_KEY` | The same, through OpenRouter |
+| `EMAIL_HOST_USER` | The mailbox approved outreach is sent from |
+| `EMAIL_HOST_PASSWORD` | Its password — for Gmail, an App Password |
+| `EMAIL_HOST`, `EMAIL_PORT` | Only for a provider other than Gmail |
+
+Three properties of this arrangement are worth stating, because a marker will
+ask about each:
+
+- **`.env` is listed in `.gitignore`,** so a real password is never committed.
+  `.env.example` is the file that is shared: same variable names, no values.
+- **A real environment variable overrides the file.** The file is a default,
+  not an override, so a server or a CI runner can inject its own values without
+  editing anything:
+  `$env:NVIDIA_API_KEY = "nvapi-..."` still wins for that one terminal.
+- **Nothing is written to `db.sqlite3`.** `LLMProvider.key_source` reports
+  `environment`, `database` or `none`, and the Configurations page shows which
+  applies to each provider, with the key itself masked.
+
+`marketpulse/env.py` is about thirty lines of standard library. Adding
+`python-dotenv` to read `KEY=value` would not have been a good trade, and the
+project deliberately has no third-party dependencies beyond Django.
 
 ### Getting live replies
 
 Without an API key the employees answer from built-in templates, and every
-reply is labelled "Template reply" so nobody is misled. To get real generation,
-set a key **in the environment before starting the server** — that keeps it out
-of `db.sqlite3` and out of version control:
+reply is labelled "Template reply" so nobody is misled. Put `NVIDIA_API_KEY`
+in `.env` and restart the server to get real generation.
 
-```powershell
-$env:NVIDIA_API_KEY = "nvapi-..."
-venv\Scripts\python.exe manage.py runserver
-```
+A key saved through the Configurations page is stored in the database and takes
+precedence over the environment; the page shows which of the two each provider
+is using. Ollama runs locally and needs no key.
 
-Recognised names are `OPENROUTER_API_KEY` and `NVIDIA_API_KEY`. Ollama needs
-none. A key saved through the Configurations page still takes precedence, and
-the page shows which of the two a provider is using.
+### Managing the mailbox by typing
+
+Aria does not only write email; she can read the mailbox too. Everything below
+is typed into the chat on the AI Employees page:
+
+| What you type | What happens |
+|---|---|
+| `any new mail?` | lists your unread messages as cards |
+| `check my inbox`, `show my last 5 emails` | lists recent messages |
+| `anything from nvidia?`, `find mail about the timetable` | searches, using Gmail's own query syntax |
+| `open 2`, `read the third one` | opens that message in full |
+| `reply to 2 saying thanks` | opens it and drafts a reply to the sender |
+| `email sam@example.com about pricing` | drafts an email, ready to send in one click |
+| `save that as a draft` | saves it to your Gmail Drafts folder |
+
+Reading uses `imaplib` from the standard library (`marketing/gmail_client.py`)
+with the same credentials SMTP uses, so nothing extra needs configuring. Three
+rules that module keeps:
+
+- **It never fetches the whole mailbox.** The account this was built against
+  holds 10,669 messages. Every call is bounded and asks for headers only unless
+  a body was requested.
+- **It never changes what it reads.** The mailbox is opened read-only and
+  bodies are fetched with `BODY.PEEK[]`, so looking at a message through Aria
+  does not mark it read in Gmail.
+- **It never raises into a view.** A mailbox that is offline or refusing the
+  password produces a readable sentence, not a 500.
+
+**Which tool runs is decided in Python, not by the model.** `marketing/mail_agent.py`
+matches what you typed against a small set of patterns and calls the tool
+itself. Asking the language model to choose would be an extra round trip and
+would make the mailbox stop working whenever the model was slow or absent —
+and this project is built to work offline. The model still writes: it phrases
+the answer and composes the emails. It is simply never what decides whether to
+open your mailbox.
+
+**The MCP tool record is what grants access.** Every mailbox action is gated on
+an enabled `MCPTool`, attached to that employee, on an enabled `MCPServer`.
+Switching Gmail off on the MCP Tools page genuinely takes the capability away,
+and each call is written to `MCPCallLog` with its arguments, outcome and
+duration. That log now contains only calls that actually ran.
+
+### Sending, in one click
+
+When Aria writes an email and the address is already known — because you named
+it, or because it is a reply to a message she opened — the reply carries an
+**Approve and send to …** button.
+
+Nothing is skipped. An `ApprovalRequest` is still created, the decision is
+still recorded against the person who made it, and the audit log still gets
+both entries, so the Approvals queue remains a complete record of everything
+ever sent. What is removed is the dialog asking for an address you gave a
+moment ago, and the trip to another page. The two-step route is unchanged and
+still there.
+
+The button needs both `add_approvalrequest` and `approve_approvalrequest`,
+because it performs both actions: an Analyst may submit, but not decide.
 
 ### Sending real email
 
 Approving an outreach email in the queue is what actually sends it. The mail
-credentials also come from the environment, and unlike the LLM keys there is
-deliberately **no way to enter them through the interface** — a mailbox
-password should not be typed into a form or written to `db.sqlite3`.
+credentials come only from `.env`, and unlike the LLM keys there is deliberately
+**no way to enter them through the interface** — a mailbox password should not
+be typed into a form or written to `db.sqlite3`.
 
-```powershell
-$env:EMAIL_HOST_USER = "you@gmail.com"
-$env:EMAIL_HOST_PASSWORD = "your-app-password"
-venv\Scripts\python.exe manage.py runserver
+```
+EMAIL_HOST_USER=you@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
 ```
 
 For Gmail this must be an [App Password](https://myaccount.google.com/apppasswords)
 with two-step verification enabled, not the account password. Google shows it
-in four groups of four; the spaces are presentation only and are stripped.
+in four groups of four; the spaces are presentation only and `settings.py`
+strips them, so the value can be pasted exactly as displayed.
 
-**Without those variables nothing breaks.** Django falls back to the console
+**Without those two variables nothing breaks.** Django falls back to the console
 backend, so an approved email is printed to the terminal instead of sent, and
 the Configurations page says so plainly rather than pretending it went out.
 

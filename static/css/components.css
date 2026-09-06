@@ -131,6 +131,7 @@
 .btn--outline-danger:hover { background: var(--color-danger-soft); color: var(--color-danger); }
 
 .btn--sm { min-height: 30px; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
+.btn--xs { min-height: 26px; padding: 2px var(--sp-2); font-size: var(--fs-xs); }
 .btn--lg { min-height: 46px; padding: var(--sp-3) var(--sp-6); font-size: var(--fs-md); }
 .btn--icon { padding: var(--sp-2); min-width: 38px; }
 .btn--block { width: 100%; }

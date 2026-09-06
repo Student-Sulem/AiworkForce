@@ -45,6 +45,7 @@ from django.core.validators import validate_email
 from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -91,19 +92,24 @@ def _pending_count():
 
 
 def _serialise_message(message):
-    """One chat message as the shape static/js/chat.js expects.
+    """One chat message, rendered by the same template Django uses on page load.
 
-    `content_html` is rendered here rather than in the browser so that the
-    Markdown implementation, and the escaping that makes it safe, exists once.
-    `content` is kept for the copy-to-clipboard action, which wants the
-    original text.
+    `html` is the whole bubble, produced by partials/_chat_message.html. The
+    browser inserts it as-is rather than rebuilding it, which is why a reply
+    looks identical whether Django or JavaScript put it on the page -- and why
+    mail cards, source badges and the send button only had to be written once.
+
+    `content` is kept alongside it for the copy-to-clipboard action, which
+    wants the original text rather than the markup.
     """
     return {
         'id': message.pk,
         'role': message.role,
         'content': message.content,
-        'content_html': (markdown.render(message.content)
-                         if message.is_assistant else ''),
+        'html': render_to_string('partials/_chat_message.html',
+                                 {'message': message,
+                                  'agent': message.conversation.agent,
+                                  'perms': _perms_for(message.conversation.user)}),
         'source': message.generation_source,
         'source_label': message.get_generation_source_display(),
         'model': message.llm_model_used,
@@ -111,6 +117,17 @@ def _serialise_message(message):
         'tools': message.tools_consulted or [],
         'created_at': timezone.localtime(message.created_at).strftime('%H:%M'),
     }
+
+
+def _perms_for(user):
+    """The `perms` object a template gets from the auth context processor.
+
+    render_to_string() outside a RequestContext has no context processors, so
+    {% if perms.marketing.x %} would silently be false and the send button
+    would never appear on a message added by JavaScript.
+    """
+    from django.contrib.auth.context_processors import PermWrapper
+    return PermWrapper(user)
 
 
 # ===========================================================================
@@ -976,6 +993,80 @@ def api_delete_conversation(request):
         'message': f'"{title}" was deleted.',
         'next_url': (reverse('conversation', args=[remaining.pk]) if remaining
                      else reverse('agents')),
+    })
+
+
+@login_required(login_url='login')
+@require_POST
+def api_send_now(request):
+    """Approve and send one reply in a single click, from the chat itself.
+
+    The two-step route still exists and is unchanged: submit here, decide on
+    the Approvals page. This endpoint is the same two steps performed together,
+    for the case where the reviewer is the person reading the reply and the
+    address is already known.
+
+    Nothing is skipped. An ApprovalRequest is still created, the decision is
+    still recorded against the person who made it, and the audit log still
+    gets both entries -- so the queue remains a complete record of everything
+    that was ever sent. What is removed is the dialog and the page change, not
+    the accountability.
+
+    Both permissions are required, because this performs both actions.
+    """
+    data = _json_body(request)
+    message = get_object_or_404(
+        ChatMessage.objects.select_related('conversation', 'conversation__agent'),
+        pk=data.get('message_id'), conversation__user=request.user)
+
+    for permission in (roles.CAN_SUBMIT, roles.CAN_APPROVE):
+        if not _requires(request, permission):
+            return _forbidden(permission)
+
+    if not message.is_assistant:
+        return _error('Only a reply from an AI employee can be sent.')
+
+    recipient = (data.get('recipient_email') or message.draft_recipient or '').strip()
+    if not recipient:
+        return _error('There is no address to send this to.')
+    try:
+        validate_email(recipient)
+    except ValidationError:
+        return _error(f'"{recipient}" is not a valid email address.')
+
+    if message.submitted_approval:
+        return _error('This reply has already been sent for approval.')
+
+    subject, _body = agent_engine.split_subject(message.content, fallback='')
+    try:
+        approval = agent_engine.submit_message_for_approval(
+            message, item_type='email', title=subject or message.content[:60],
+            recipient_email=recipient)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    agent_engine.apply_approval(approval, request.user, 'approved')
+    approval.refresh_from_db()
+    email = approval.email_outreach
+
+    # apply_approval never raises on a delivery failure -- it records the reason
+    # on the row so the decision is not lost. Report it honestly rather than
+    # claiming the message went out.
+    if email.delivery_error:
+        return JsonResponse({
+            'status': 'error',
+            'message': f'Not sent: {email.delivery_error}',
+            'approval_id': approval.pk,
+            'html': _serialise_message(message)['html'],
+        }, status=200)
+
+    return JsonResponse({
+        'status': 'success',
+        'message': f'Sent to {email.recipient}.',
+        'approval_id': approval.pk,
+        'approval_url': reverse('approval_detail', args=[approval.pk]),
+        'html': _serialise_message(message)['html'],
+        'pending_count': _pending_count(),
     })
 
 

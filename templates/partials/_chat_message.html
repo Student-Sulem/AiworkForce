@@ -47,6 +47,10 @@
         <div class="msg__content">{{ message.content }}</div>
         {% endif %}
 
+        {% if message.mail_listing %}
+        {% include 'partials/_mail_list.html' with mail=message.mail_listing opened=message.metadata.opened %}
+        {% endif %}
+
         {% if message.is_assistant %}
         <div class="msg__meta">
             {% if message.generation_source == 'live' %}
@@ -73,11 +77,33 @@
         <div class="msg__actions">
             {% with approval=message.submitted_approval %}
             {% if approval %}
+                {% if approval.email_outreach.delivered_at %}
+                <span class="badge badge--success">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                    Sent to {{ approval.email_outreach.recipient }}
+                </span>
+                {% endif %}
                 <a href="{% url 'approval_detail' approval.pk %}" class="btn btn--ghost btn--sm">
                     <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
                     In the queue &middot; {{ approval.get_status_display }}
                 </a>
             {% else %}
+                {% comment %}
+                    When the address is already known -- because the person named
+                    it, or because this is a reply to a message Aria opened --
+                    approving and sending is one click. The approval record is
+                    still written, so who sent what is still auditable; what is
+                    removed is the dialog asking for an address that was given a
+                    moment ago, and the trip to another page.
+                {% endcomment %}
+                {% if message.draft_recipient and perms.marketing.approve_approvalrequest %}
+                <button class="btn btn--primary btn--sm" type="button"
+                        data-send-now="{{ message.pk }}"
+                        data-recipient="{{ message.draft_recipient }}">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                    Approve and send to {{ message.draft_recipient }}
+                </button>
+                {% endif %}
                 <button class="btn btn--secondary btn--sm" type="button"
                         data-submit-message="{{ message.pk }}">
                     <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>

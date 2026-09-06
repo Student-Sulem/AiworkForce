@@ -1,0 +1,62 @@
+{% comment %}
+    Messages read from the real mailbox, shown under an employee's reply.
+
+    INCLUDE CONTRACT
+        mail   required  list of dicts from marketing/gmail_client.py, each with
+                         uid, sender, subject, snippet, body, date_display,
+                         is_unread
+        opened optional  the uid that was opened in full; that card shows its
+                         whole body rather than a snippet
+
+    WHY CARDS RATHER THAN TEXT IN THE REPLY
+        The model is told the listing is already on screen and not to repeat it,
+        so the reply stays one or two sentences of judgement while the detail
+        lives here. It also means the numbering the person types back at Aria
+        ("open 2") is the numbering they can see.
+
+    Everything here is escaped by the template engine. Mailbox content is
+    written by strangers, so none of it is ever marked safe.
+
+    USAGE
+        {% include 'partials/_mail_list.html' with mail=message.mail_listing opened=message.metadata.opened %}
+{% endcomment %}
+<ol class="maillist" aria-label="Messages from your mailbox">
+    {% for item in mail %}
+    <li class="maillist__item {% if item.is_unread %}maillist__item--unread{% endif %}"
+        data-mail-uid="{{ item.uid }}">
+
+        <span class="maillist__index" aria-hidden="true">{{ forloop.counter }}</span>
+
+        <div class="maillist__main">
+            <p class="maillist__top">
+                <span class="maillist__from">{{ item.sender }}</span>
+                <time class="maillist__date">{{ item.date_display }}</time>
+            </p>
+
+            <p class="maillist__subject">
+                {% if item.is_unread %}
+                <span class="maillist__dot" title="Unread" aria-label="Unread"></span>
+                {% endif %}
+                {{ item.subject }}
+            </p>
+
+            {% if opened and opened == item.uid %}
+                <div class="maillist__body">{{ item.body }}</div>
+            {% elif item.snippet %}
+                <p class="maillist__snippet">{{ item.snippet }}</p>
+            {% endif %}
+
+            <p class="maillist__actions">
+                <button type="button" class="btn btn--ghost btn--xs"
+                        data-mail-say="open {{ forloop.counter }}">
+                    <i class="fa-regular fa-envelope-open" aria-hidden="true"></i> Open
+                </button>
+                <button type="button" class="btn btn--ghost btn--xs"
+                        data-mail-say="reply to {{ forloop.counter }}">
+                    <i class="fa-solid fa-reply" aria-hidden="true"></i> Reply
+                </button>
+            </p>
+        </div>
+    </li>
+    {% endfor %}
+</ol>
