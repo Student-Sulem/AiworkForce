@@ -1,0 +1,50 @@
+{% extends 'base_public.html' %}
+{% comment %}
+    Create an account. Rendered by marketing.views.register_view at the URL
+    named 'register'.
+
+    On success the view calls agent_engine.ensure_workspace_for_user, which
+    provisions four AI employees, three LLM providers with their model
+    catalogues, and seven MCP servers with their tools.
+{% endcomment %}
+
+{% block title %}Create account | AI Workforce{% endblock %}
+{% block body_class %}page-auth{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <div class="u-text-center u-mb-6">
+            <span class="avatar avatar--lg" style="margin: 0 auto var(--sp-4);">
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+            </span>
+            <h1>Create your workspace</h1>
+            <p class="u-text-sm u-text-muted u-mt-2">
+                Four AI employees and seven MCP servers are provisioned automatically.
+            </p>
+        </div>
+
+        {% include 'partials/_messages.html' %}
+
+        <form method="post" action="{% url 'register' %}">
+            {% csrf_token %}
+
+            {% for field in form %}
+                {% include 'partials/_form_field.html' with field=field %}
+            {% endfor %}
+
+            {% for error in form.non_field_errors %}
+            <p class="form-field__error" role="alert">{{ error }}</p>
+            {% endfor %}
+
+            <button class="btn btn--primary btn--block u-mt-4" type="submit">
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i> Create account
+            </button>
+        </form>
+
+        <p class="u-text-center u-text-sm u-text-muted u-mt-6 u-m-0">
+            Already have an account? <a href="{% url 'login' %}">Sign in</a>.
+        </p>
+    </div>
+</div>
+{% endblock %}

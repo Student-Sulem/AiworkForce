@@ -1,0 +1,17 @@
+# AI Workforce -- Python dependencies
+#
+# Deliberately minimal. The application uses only Django plus the Python
+# standard library: the live language-model client in marketing/llm_client.py
+# is built on urllib.request rather than the `requests` package, so the project
+# runs anywhere Django is installed with no further downloads.
+#
+# Install with:
+#     pip install -r requirements.txt
+
+Django==6.1
+
+# Pulled in automatically by Django, pinned here so the environment is
+# reproducible.
+asgiref==3.12.1
+sqlparse==0.5.5
+tzdata==2026.3

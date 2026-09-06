@@ -1,0 +1,48 @@
+{% load static %}
+{% comment %}
+    base_public.html -- the shell for pages a signed-out visitor can reach:
+    the landing page, sign in and sign up.
+
+    It shares partials/_head.html with base.html, so the two shells always
+    load the same stylesheets in the same order and can never drift apart.
+    The difference is the chrome: a simple top navigation bar instead of the
+    application sidebar.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{% block title %}AI Workforce{% endblock %}</title>
+    {% include 'partials/_head.html' %}
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
+
+    {% block navbar %}
+    <header class="public-navbar">
+        <a href="{% url 'landing' %}" class="sidebar__brand u-m-0">
+            <span class="sidebar__logo"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
+            <span>AI Workforce</span>
+        </a>
+
+        <div class="u-flex u-items-center u-gap-2">
+            {% include 'partials/_theme_toggle.html' %}
+            <a href="{% url 'login' %}" class="btn btn--secondary btn--sm">Sign in</a>
+            <a href="{% url 'register' %}" class="btn btn--primary btn--sm">Create account</a>
+        </div>
+    </header>
+    {% endblock %}
+
+    <main id="mainContent" tabindex="-1">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% include 'partials/_toast_region.html' %}
+    <form id="csrfHolder" hidden>{% csrf_token %}</form>
+
+    <script src="{% static 'js/core.js' %}" defer></script>
+    <script src="{% static 'js/theme.js' %}" defer></script>
+    <script src="{% static 'js/toast.js' %}" defer></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

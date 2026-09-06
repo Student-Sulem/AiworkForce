@@ -1,0 +1,241 @@
+{% extends 'base.html' %}
+{% comment %}
+    PAGE 1 of 6 -- Dashboard.
+    Rendered by marketing.views.dashboard_view at the URL named 'dashboard'.
+{% endcomment %}
+
+{% block title %}Dashboard | AI Workforce{% endblock %}
+{% block body_class %}page-dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}
+    Welcome back, {{ user.username }}. Here is what your AI workforce has been doing.
+{% endblock %}
+
+{% block page_actions %}
+    <button class="btn btn--secondary" type="button" data-modal-open="newCampaignModal">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> New campaign
+    </button>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Talk to an employee
+    </a>
+    <a href="{% url 'approvals' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+        Review queue{% if pending_count %} ({{ pending_count }}){% endif %}
+    </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Headline figures -->
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Total prospects" value=total_leads icon="fa-users" tone="primary" meta=hot_leads|stringformat:"s"|add:" rated hot" %}
+    {% include 'partials/_kpi_tile.html' with label="Awaiting approval" value=pending_count icon="fa-clock" tone="warning" href="/approvals/" meta="Nothing publishes without you" %}
+    {% include 'partials/_kpi_tile.html' with label="Published posts" value=published_posts icon="fa-share-nodes" tone="success" meta="Approved and live" %}
+    {% include 'partials/_kpi_tile.html' with label="Active campaigns" value=active_campaigns icon="fa-bullhorn" tone="info" %}
+</div>
+
+<div class="grid grid-2 u-mb-6">
+
+    <!-- Start a conversation with an employee -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-comments" aria-hidden="true"></i> Your AI employees
+            </h2>
+            <a href="{% url 'agents' %}" class="btn btn--ghost btn--sm">Open chat</a>
+        </div>
+        <div class="card__body stack">
+            <p class="u-text-sm u-text-muted u-m-0">
+                Talk to an employee to get work drafted. Nothing it writes goes anywhere
+                until you send it to the approval queue and approve it there.
+            </p>
+
+            {% for employee in agents %}
+            <a class="start-chat" href="{% url 'agents' %}">
+                <span class="avatar" style="background: {{ employee.avatar_color }};">
+                    <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
+                </span>
+                <span class="u-grow" style="min-width:0;">
+                    <span class="u-semibold" style="display:block;">{{ employee.name }}</span>
+                    <span class="u-text-xs u-text-subtle u-truncate" style="display:block;">
+                        {{ employee.role }}
+                        {% if employee.has_live_llm %}
+                            &middot; {{ employee.llm_model.model_id }}
+                        {% else %}
+                            &middot; template replies
+                        {% endif %}
+                    </span>
+                </span>
+                <i class="fa-solid fa-chevron-right u-text-subtle" aria-hidden="true"></i>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- Platform health -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i> Platform status
+            </h2>
+        </div>
+        <div class="card__body">
+            <div class="datalist">
+                <div class="datalist__row">
+                    <span class="datalist__key">MCP servers connected</span>
+                    <span class="datalist__value">{{ online_servers }} of {{ total_servers }}</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">LLM providers configured</span>
+                    <span class="datalist__value">{{ configured_providers }} of 3</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Approved today</span>
+                    <span class="datalist__value">{{ approved_today }}</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Rejected all time</span>
+                    <span class="datalist__value">{{ rejected_count }}</span>
+                </div>
+            </div>
+
+            <div class="u-flex u-gap-2 u-wrap u-mt-6">
+                <a href="{% url 'configurations' %}" class="btn btn--secondary btn--sm">
+                    <i class="fa-solid fa-sliders" aria-hidden="true"></i> Configurations
+                </a>
+                <a href="{% url 'mcp_tools' %}" class="btn btn--secondary btn--sm">
+                    <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i> MCP tools
+                </a>
+            </div>
+        </div>
+    </section>
+</div>
+
+<div class="grid grid-2">
+
+    <!-- Campaigns -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Campaigns
+            </h2>
+            <button class="btn btn--ghost btn--sm" type="button" data-modal-open="newCampaignModal">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> New
+            </button>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if campaigns %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Campaign</th>
+                            <th scope="col">Assigned to</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for campaign in campaigns %}
+                        <tr>
+                            <td data-label="Campaign">
+                                <span class="u-semibold">{{ campaign.name }}</span>
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ campaign.target_audience|truncatechars:44 }}
+                                </span>
+                            </td>
+                            <td data-label="Assigned to">
+                                {{ campaign.assigned_agent.name|default:"Unassigned" }}
+                            </td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=campaign.status label=campaign.get_status_display %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-bullhorn" title="No campaigns yet" message="Create a campaign to give your AI employees something to work towards." %}
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- Recent activity -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent activity
+            </h2>
+            <a href="{% url 'approvals' %}" class="btn btn--ghost btn--sm">View all</a>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if recent_approvals %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Item</th>
+                            <th scope="col">Employee</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for approval in recent_approvals %}
+                        <tr>
+                            <td data-label="Item">
+                                <a href="{% url 'approval_detail' approval.pk %}">
+                                    <i class="fa-solid {{ approval.icon }}" aria-hidden="true"></i>
+                                    {{ approval.title|truncatechars:38 }}
+                                </a>
+                            </td>
+                            <td data-label="Employee">{{ approval.agent.name|default:"System" }}</td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=approval.status label=approval.get_status_display %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-inbox" title="No activity yet" message="Run an AI employee above to generate your first draft." %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+
+{% block modals %}
+<div class="modal {% if campaign_form.errors %}is-open{% endif %}" id="newCampaignModal"
+     role="dialog" aria-modal="true" aria-labelledby="newCampaignTitle" aria-hidden="true">
+    <div class="modal__box">
+        <form method="post" action="{% url 'dashboard' %}">
+            {% csrf_token %}
+            <div class="modal__header">
+                <h2 class="modal__title" id="newCampaignTitle">
+                    <i class="fa-solid fa-bullhorn" aria-hidden="true"></i> New campaign
+                </h2>
+                <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal__body">
+                {% include 'partials/_form_field.html' with field=campaign_form.name %}
+                {% include 'partials/_form_field.html' with field=campaign_form.objective %}
+                {% include 'partials/_form_field.html' with field=campaign_form.target_audience %}
+                <div class="form-row form-row--2">
+                    {% include 'partials/_form_field.html' with field=campaign_form.budget %}
+                    {% include 'partials/_form_field.html' with field=campaign_form.status %}
+                </div>
+                {% include 'partials/_form_field.html' with field=campaign_form.assigned_agent %}
+            </div>
+
+            <div class="modal__footer">
+                <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+                <button class="btn btn--primary" type="submit">Create campaign</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+

@@ -1,0 +1,9 @@
+{% comment %}
+    Where toast.js injects transient notifications raised by fetch() calls.
+    aria-live="polite" means a screen reader announces new toasts without
+    interrupting whatever it is currently reading.
+
+    Takes no include variables.
+{% endcomment %}
+<div id="toastRegion" class="toast-region" role="region"
+     aria-label="Notifications" aria-live="polite"></div>

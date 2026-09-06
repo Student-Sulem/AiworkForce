@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% comment %}
+    Create or edit a MCP server.
+    Rendered by the matching view in marketing/views.py. The same template
+    serves both operations: the view supplies the heading, the button label and
+    where Cancel goes, so there is one layout rather than two that drift apart.
+
+    The view is decorated with @permission_required, so reaching this page at
+    all already means the role allows it.
+{% endcomment %}
+
+{% block title %}{{ heading }} | AI Workforce{% endblock %}
+{% block body_class %}page-mcp{% endblock %}
+{% block page_title %}{{ heading }}{% endblock %}
+{% block page_subtitle %}{{ subheading }}{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'mcp_tools' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Back to MCP Tools
+    </a>
+{% endblock %}
+
+{% block content %}
+    {% include 'partials/_object_form.html' %}
+{% endblock %}

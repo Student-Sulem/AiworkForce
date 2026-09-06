@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    One MCP server's connection settings, its tools, and its call log.
+    Rendered by marketing.views.mcp_server_detail_view at the URL named
+    'mcp_server_detail'.
+
+    The page posts to itself twice over: `action=add_tool` adds a capability,
+    anything else saves the server. The view branches on that hidden field.
+{% endcomment %}
+
+{% block title %}{{ server.name }} | MCP Tools{% endblock %}
+{% block body_class %}page-mcp{% endblock %}
+{% block page_title %}{{ server.name }}{% endblock %}
+{% block page_subtitle %}
+    {{ server.get_category_display }} &middot; {{ server.get_transport_display }} transport
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'mcp_tools' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> All servers
+    </a>
+    <button class="btn btn--primary" type="button" data-test-server="{{ server.pk }}"
+            data-test-url="{% url 'api_test_mcp_server' %}">
+        <i class="fa-solid fa-plug" aria-hidden="true"></i> Test
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-2" data-server-card>
+
+    <!-- Connection settings -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-gear" aria-hidden="true"></i> Connection
+            </h2>
+            <span class="badge badge--{% if server.connection_status == 'connected' %}success{% elif server.connection_status == 'degraded' %}warning{% elif server.connection_status == 'failed' %}danger{% else %}neutral{% endif %}"
+                  data-status-pill>{{ server.get_connection_status_display }}</span>
+        </div>
+        <div class="card__body">
+            <div class="alert alert--info u-mb-4" data-test-result
+                 {% if not server.last_status_message %}hidden{% endif %} role="status">
+                {{ server.last_status_message }}
+            </div>
+
+            <form method="post" action="{% url 'mcp_server_detail' server.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="server_id" value="{{ server.pk }}">
+
+                {% include 'partials/_form_field.html' with field=form.name %}
+                {% include 'partials/_form_field.html' with field=form.description %}
+
+                <div class="form-row form-row--2">
+                    {% include 'partials/_form_field.html' with field=form.category %}
+                    {% include 'partials/_form_field.html' with field=form.transport %}
+                </div>
+
+                <div class="form-row form-row--2">
+                    {% include 'partials/_form_field.html' with field=form.command hint="Recorded for documentation. This project never executes it." %}
+                    {% include 'partials/_form_field.html' with field=form.args %}
+                </div>
+
+                {% include 'partials/_form_field.html' with field=form.endpoint_url %}
+                {% include 'partials/_form_field.html' with field=form.auth_token hint="Leave blank to keep the stored credential." %}
+
+                <div class="form-row form-row--2">
+                    {% include 'partials/_form_field.html' with field=form.icon %}
+                    {% include 'partials/_form_field.html' with field=form.color %}
+                </div>
+
+                <label class="form-check-row u-mb-4">
+                    {{ form.is_enabled }} Enabled
+                </label>
+
+                <div class="form-actions">
+                    <button class="btn btn--primary" type="submit">
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save server
+                    </button>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <div class="stack">
+
+        <!-- Capabilities -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
+                    Capabilities ({{ tools|length }})
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if tools %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Tool</th>
+                                <th scope="col">Description</th>
+                                <th scope="col">State</th>
+                                <th scope="col">Calls</th>
+                                {% if perms.marketing.delete_mcptool %}<th scope="col"></th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for tool in tools %}
+                            <tr>
+                                <td data-label="Tool">
+                                    <code>{{ tool.tool_name }}</code>
+                                    {% if tool.is_destructive %}
+                                    <span class="badge badge--danger">writes</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Description" class="u-text-xs u-text-muted">
+                                    {{ tool.description|truncatechars:56 }}
+                                </td>
+                                <td data-label="State">
+                                    {% if tool.is_enabled %}
+                                    <span class="badge badge--success">Enabled</span>
+                                    {% else %}
+                                    <span class="badge badge--neutral">Disabled</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Calls">{{ tool.call_count }}</td>
+                                {% if perms.marketing.delete_mcptool %}
+                                <td data-label="">
+                                    <form method="post" action="{% url 'mcp_tool_delete' tool.pk %}"
+                                          onsubmit="return confirm('Remove {{ tool.display_name|escapejs }}?');">
+                                        {% csrf_token %}
+                                        <button class="btn btn--ghost btn--sm" type="submit"
+                                                title="Remove this capability">
+                                            <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-screwdriver-wrench" title="No capabilities yet" message="Add one using the form below." %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- Add a capability -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a capability
+                </h2>
+            </div>
+            <div class="card__body">
+                <form method="post" action="{% url 'mcp_server_detail' server.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="add_tool">
+
+                    {% include 'partials/_form_field.html' with field=tool_form.server %}
+                    <div class="form-row form-row--2">
+                        {% include 'partials/_form_field.html' with field=tool_form.tool_name %}
+                        {% include 'partials/_form_field.html' with field=tool_form.display_name %}
+                    </div>
+                    {% include 'partials/_form_field.html' with field=tool_form.description %}
+
+                    <label class="form-check-row u-mb-2">
+                        {{ tool_form.is_enabled }} Enabled
+                    </label>
+                    <label class="form-check-row u-mb-4">
+                        {{ tool_form.is_destructive }}
+                        Writes to the outside world (always requires approval)
+                    </label>
+
+                    <div class="form-actions">
+                        <button class="btn btn--secondary" type="submit">Add capability</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- Call log -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-list-ul" aria-hidden="true"></i> Recent calls
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if recent_calls %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Tool</th>
+                                <th scope="col">Employee</th>
+                                <th scope="col">Outcome</th>
+                                <th scope="col">When</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for call in recent_calls %}
+                            <tr>
+                                <td data-label="Tool"><code>{{ call.tool.tool_name }}</code></td>
+                                <td data-label="Employee">{{ call.agent.name }}</td>
+                                <td data-label="Outcome">
+                                    {% include 'partials/_status_badge.html' with status=call.outcome label=call.get_outcome_display %}
+                                </td>
+                                <td data-label="When">{{ call.called_at|timesince }} ago</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-list-ul" title="No calls recorded" message="Calls are logged whenever an AI employee uses this server." %}
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/mcp.js' %}" defer></script>
+{% endblock %}

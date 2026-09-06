@@ -1,0 +1,245 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    PAGE 3 of 6 -- Approvals.
+    Rendered by marketing.views.approvals_view at the URL named 'approvals'.
+
+    The tabs are server-rendered links carrying ?status=..., not client-side
+    panels, so filtering works with JavaScript switched off. Approve and
+    reject are ordinary POST forms for the same reason; approvals.js only adds
+    bulk selection and the rejection dialog on top.
+{% endcomment %}
+
+{% block title %}Approvals | AI Workforce{% endblock %}
+{% block body_class %}page-approvals{% endblock %}
+{% block page_title %}Approvals{% endblock %}
+{% block page_subtitle %}
+    Your AI employees propose; you decide. Nothing reaches the outside world without approval here.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'agents' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-robot" aria-hidden="true"></i> Run an employee
+    </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Status tabs, rendered as links -->
+<nav class="tabs" aria-label="Filter by status">
+    <a href="?status=pending" class="tabs__item {% if status_filter == 'pending' %}is-active{% endif %}">
+        <i class="fa-solid fa-clock" aria-hidden="true"></i> Pending
+        <span class="tabs__count">{{ pending_count }}</span>
+    </a>
+    <a href="?status=approved" class="tabs__item {% if status_filter == 'approved' %}is-active{% endif %}">
+        <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Approved
+        <span class="tabs__count">{{ approved_count }}</span>
+    </a>
+    <a href="?status=rejected" class="tabs__item {% if status_filter == 'rejected' %}is-active{% endif %}">
+        <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Rejected
+        <span class="tabs__count">{{ rejected_count }}</span>
+    </a>
+    <a href="?status=all" class="tabs__item {% if status_filter == 'all' %}is-active{% endif %}">
+        All <span class="tabs__count">{{ total_count }}</span>
+    </a>
+</nav>
+
+<!-- Type filter and search, submitted as a GET form so it needs no JavaScript -->
+<form class="toolbar" method="get" action="{% url 'approvals' %}">
+    <input type="hidden" name="status" value="{{ status_filter }}">
+    <div class="toolbar__search">
+        <label class="sr-only" for="approvalSearch">Search approvals</label>
+        <input class="form-input" id="approvalSearch" type="search" name="q"
+               value="{{ search_query }}" placeholder="Search titles and content">
+    </div>
+    <div class="toolbar__filters">
+        <label class="sr-only" for="approvalType">Filter by type</label>
+        <select class="form-select" id="approvalType" name="type">
+            <option value="all" {% if type_filter == 'all' %}selected{% endif %}>All types</option>
+            {% for value, label in item_types %}
+            <option value="{{ value }}" {% if type_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn--secondary" type="submit">
+            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
+        </button>
+        {% if search_query or type_filter != 'all' %}
+        <a class="btn btn--ghost" href="?status={{ status_filter }}">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+{% if approvals %}
+
+    {% if status_filter == 'pending' and perms.marketing.approve_approvalrequest %}
+    <!-- Bulk selection bar -->
+    <div class="card u-mb-4">
+        <div class="card__body u-flex u-items-center u-gap-3 u-wrap">
+            <label class="form-check-row">
+                <input class="form-check" type="checkbox" id="selectAllApprovals">
+                Select all on this page
+            </label>
+            <div class="u-grow"></div>
+            <div class="u-flex u-gap-2 u-wrap" id="bulkBar" hidden>
+                <span class="badge badge--primary"><span id="bulkCount">0</span> selected</span>
+                <button class="btn btn--success btn--sm" type="button"
+                        data-bulk-decision="approved" data-bulk-url="{% url 'api_bulk_approval' %}">
+                    <i class="fa-solid fa-check" aria-hidden="true"></i> Approve selected
+                </button>
+                <button class="btn btn--outline-danger btn--sm" type="button"
+                        data-bulk-decision="rejected" data-bulk-url="{% url 'api_bulk_approval' %}">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject selected
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="stack">
+        {% for approval in approvals %}
+        <article class="card approval-card">
+            <div class="card__body">
+
+                <div class="u-flex u-items-start u-gap-3 u-mb-4 u-wrap">
+                    {% if approval.is_pending and perms.marketing.approve_approvalrequest %}
+                    <label class="sr-only" for="select-{{ approval.pk }}">Select this item</label>
+                    <input class="form-check u-mt-2" id="select-{{ approval.pk }}" type="checkbox"
+                           value="{{ approval.pk }}" data-approval-select>
+                    {% endif %}
+
+                    <span class="kpi__icon kpi__icon--primary">
+                        <i class="fa-solid {{ approval.icon }}" aria-hidden="true"></i>
+                    </span>
+
+                    <div class="u-grow">
+                        <h2 class="card__title u-m-0">
+                            <a href="{% url 'approval_detail' approval.pk %}">{{ approval.title }}</a>
+                        </h2>
+                        <p class="card__subtitle">
+                            {{ approval.get_item_type_display }}
+                            &middot; produced by {{ approval.agent.name|default:"the system" }}
+                            &middot; {{ approval.requested_at|timesince }} ago
+                        </p>
+                    </div>
+
+                    <div class="u-flex u-gap-2 u-wrap u-items-center">
+                        {% include 'partials/_status_badge.html' with status=approval.generation_source label=approval.get_generation_source_display %}
+                        {% if approval.priority == 'high' %}
+                            {% include 'partials/_status_badge.html' with status="high" label="High priority" %}
+                        {% endif %}
+                        {% include 'partials/_status_badge.html' with status=approval.status label=approval.get_status_display dot=True %}
+                    </div>
+                </div>
+
+                <div class="preview">{{ approval.payload_preview }}</div>
+
+                {% if approval.llm_model_used %}
+                <p class="u-text-xs u-text-subtle u-mt-2 u-m-0">
+                    Generated with <code>{{ approval.llm_model_used }}</code>
+                    {% if approval.tokens_used %}&middot; {{ approval.tokens_used }} tokens{% endif %}
+                </p>
+                {% endif %}
+
+                {% if approval.decision_reason %}
+                <div class="alert alert--danger u-mt-4">
+                    <i class="fa-solid fa-comment" aria-hidden="true"></i>
+                    <span><strong>Reason given:</strong> {{ approval.decision_reason }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="card__footer">
+                {% if approval.is_pending and perms.marketing.approve_approvalrequest %}
+                <form method="post" action="{% url 'approvals' %}" class="u-flex u-gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="approval_id" value="{{ approval.pk }}">
+                    <input type="hidden" name="decision" value="approved">
+                    <input type="hidden" name="return_status" value="{{ status_filter }}">
+                    <button class="btn btn--success btn--sm" type="submit">
+                        <i class="fa-solid fa-check" aria-hidden="true"></i> Approve
+                    </button>
+                </form>
+
+                <button class="btn btn--outline-danger btn--sm" type="button"
+                        data-reject="{{ approval.pk }}" data-title="{{ approval.title }}">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
+                </button>
+                {% elif approval.is_pending %}
+                <span class="u-text-sm u-text-muted">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    Awaiting a Manager
+                </span>
+                {% else %}
+                <span class="u-text-sm u-text-muted">{{ approval.decision_summary }}</span>
+                {% endif %}
+
+                <div class="u-grow"></div>
+                <a href="{% url 'approval_detail' approval.pk %}" class="btn btn--ghost btn--sm">
+                    Open <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+
+    {% include 'partials/_pagination.html' with page_obj=page_obj querystring="status="|add:status_filter %}
+
+{% else %}
+    <div class="card">
+        {% if status_filter == 'pending' %}
+            {% include 'partials/_empty_state.html' with icon="fa-inbox" title="The queue is clear" message="Nothing is waiting for review. Run an AI employee to generate work." action_url="/agents/" action_label="Go to AI Employees" %}
+        {% else %}
+            {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing here" message="No items match this filter." %}
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}
+
+
+{% block modals %}
+<div class="modal" id="rejectModal" role="dialog" aria-modal="true"
+     aria-labelledby="rejectTitle" aria-hidden="true">
+    <div class="modal__box modal__box--sm">
+        <form method="post" action="{% url 'approvals' %}" id="rejectForm">
+            {% csrf_token %}
+            <input type="hidden" name="approval_id" id="rejectApprovalId">
+            <input type="hidden" name="decision" value="rejected">
+            <input type="hidden" name="return_status" value="{{ status_filter }}">
+
+            <div class="modal__header">
+                <h2 class="modal__title" id="rejectTitle">
+                    <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Reject item
+                </h2>
+                <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal__body">
+                <p class="u-text-sm u-text-muted">
+                    Rejecting <strong id="rejectApprovalTitle">this item</strong>.
+                    It will not be published, and the reason is recorded in the audit trail.
+                </p>
+                <div class="form-field">
+                    <label class="form-field__label" for="rejectReason">
+                        Reason <span class="form-field__required" aria-hidden="true">*</span>
+                    </label>
+                    <textarea class="form-textarea" id="rejectReason" name="reason" rows="4"
+                              required placeholder="Explain what is wrong with this draft"></textarea>
+                    <p class="form-field__hint">
+                        Required. ApprovalDecisionForm.clean() rejects a blank reason server-side.
+                    </p>
+                </div>
+            </div>
+
+            <div class="modal__footer">
+                <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+                <button class="btn btn--danger" type="submit">Reject</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/approvals.js' %}" defer></script>
+{% endblock %}

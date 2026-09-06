@@ -1,0 +1,53 @@
+{% extends 'base_public.html' %}
+{% comment %}
+    Sign in. Rendered by marketing.views.login_view at the URL named 'login'.
+{% endcomment %}
+
+{% block title %}Sign in | AI Workforce{% endblock %}
+{% block body_class %}page-auth{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card">
+        <div class="u-text-center u-mb-6">
+            <span class="avatar avatar--lg" style="margin: 0 auto var(--sp-4);">
+                <i class="fa-solid fa-user-gear" aria-hidden="true"></i>
+            </span>
+            <h1>Sign in</h1>
+            <p class="u-text-sm u-text-muted u-mt-2">
+                Access your AI workforce and approval queue.
+            </p>
+        </div>
+
+        {% include 'partials/_messages.html' %}
+
+        <form method="post" action="{% url 'login' %}">
+            {% csrf_token %}
+
+            <div class="form-field">
+                <label class="form-field__label" for="id_username">Username</label>
+                <input class="form-input" id="id_username" type="text" name="username"
+                       autocomplete="username" required autofocus>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="id_password">Password</label>
+                <input class="form-input" id="id_password" type="password" name="password"
+                       autocomplete="current-password" required>
+            </div>
+
+            {% for error in form.non_field_errors %}
+            <p class="form-field__error" role="alert">{{ error }}</p>
+            {% endfor %}
+
+            <button class="btn btn--primary btn--block u-mt-4" type="submit">
+                <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i> Sign in
+            </button>
+        </form>
+
+        <p class="u-text-center u-text-sm u-text-muted u-mt-6 u-m-0">
+            No account yet? <a href="{% url 'register' %}">Create one</a>.
+        </p>
+    </div>
+</div>
+{% endblock %}

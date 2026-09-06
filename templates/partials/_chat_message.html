@@ -1,0 +1,95 @@
+{% load chat_extras %}
+{% comment %}
+    One turn in a conversation.
+
+    INCLUDE CONTRACT
+        message  required  ChatMessage
+        agent    required  AIAgent   the employee this thread belongs to
+
+    A person's message and an employee's reply share this partial so the two
+    can never drift apart in styling. Only an assistant reply carries the
+    source label and the "Send for approval" action; there is nothing to
+    approve about something the user typed themselves.
+
+    An employee's reply is Markdown, rendered to safe HTML by the `markdown`
+    filter (marketing/markdown.py, which escapes before it generates). What the
+    person typed is NOT run through it: they typed text, not markup, and it
+    should appear exactly as written.
+
+    static/js/chat.js does not re-implement any of this. The JSON endpoint
+    returns the same server-rendered HTML, so a reply looks identical whether
+    Django or JavaScript put it on the page.
+
+    USAGE
+        {% include 'partials/_chat_message.html' with message=message agent=agent %}
+{% endcomment %}
+<article class="msg msg--{{ message.role }}" data-message-id="{{ message.pk }}">
+
+    <span class="msg__avatar"
+          {% if message.is_assistant %}style="background: {{ agent.avatar_color }};"{% endif %}>
+        {% if message.is_assistant %}
+            <i class="fa-solid {{ agent.avatar_icon }}" aria-hidden="true"></i>
+        {% else %}
+            <i class="fa-solid fa-user" aria-hidden="true"></i>
+        {% endif %}
+    </span>
+
+    <div class="msg__body">
+        <p class="msg__who u-m-0">
+            {% if message.is_assistant %}{{ agent.name }}{% else %}You{% endif %}
+            <time class="msg__time" datetime="{{ message.created_at|date:'c' }}"
+                  title="{{ message.created_at|date:'j M Y, H:i' }}">{{ message.created_at|date:"H:i" }}</time>
+        </p>
+
+        {% if message.is_assistant %}
+        <div class="msg__content msg__content--rich">{{ message.content|markdown }}</div>
+        {% else %}
+        <div class="msg__content">{{ message.content }}</div>
+        {% endif %}
+
+        {% if message.is_assistant %}
+        <div class="msg__meta">
+            {% if message.generation_source == 'live' %}
+                <span class="badge badge--success">
+                    <i class="fa-solid fa-bolt" aria-hidden="true"></i> Live model
+                </span>
+                {% if message.llm_model_used %}
+                <span class="chip chip--mono">{{ message.llm_model_used }}</span>
+                {% endif %}
+                {% if message.tokens_used %}
+                <span class="u-text-xs u-text-subtle">{{ message.tokens_used }} tokens</span>
+                {% endif %}
+            {% else %}
+                <span class="badge badge--neutral">
+                    <i class="fa-solid fa-file-lines" aria-hidden="true"></i> Template reply
+                </span>
+            {% endif %}
+
+            {% for tool in message.tools_consulted %}
+            <span class="chip chip--mono">{{ tool }}</span>
+            {% endfor %}
+        </div>
+
+        <div class="msg__actions">
+            {% with approval=message.submitted_approval %}
+            {% if approval %}
+                <a href="{% url 'approval_detail' approval.pk %}" class="btn btn--ghost btn--sm">
+                    <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                    In the queue &middot; {{ approval.get_status_display }}
+                </a>
+            {% else %}
+                <button class="btn btn--secondary btn--sm" type="button"
+                        data-submit-message="{{ message.pk }}">
+                    <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                    Send for approval
+                </button>
+            {% endif %}
+            {% endwith %}
+            <button class="btn btn--ghost btn--sm" type="button"
+                    data-copy-message="{{ message.pk }}">
+                <i class="fa-regular fa-copy" aria-hidden="true"></i> Copy
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</article>

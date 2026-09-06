@@ -1,0 +1,35 @@
+{% comment %}
+    A status pill.
+
+    INCLUDE CONTRACT
+        status  required  str   the machine value, e.g. "published"
+        label   optional  str   human-readable text, normally the model's
+                                get_<field>_display. Used verbatim.
+        tone    optional  str   explicit override, skipping the mapping below
+        dot     optional  bool  render a leading status dot
+
+    The |title filter is applied only to the raw `status` fallback. A supplied
+    `label` is already human-readable, and title-casing it would turn
+    "Submitted for Review" into "Submitted For Review".
+
+    WHY THIS PARTIAL EXISTS
+    The old templates wrote class="badge-{{ object.status }}", which produced
+    an unstyled class for every status the stylesheet had not anticipated --
+    paused, completed, offline, replied, qualified, unresponsive, sent, opened
+    and bounced all rendered as bare, unstyled text. Mapping status to tone in
+    one place means an unknown value degrades to a neutral pill instead.
+
+    USAGE
+        {% include 'partials/_status_badge.html' with status=post.status label=post.get_status_display dot=True %}
+{% endcomment %}
+{% if tone %}
+<span class="badge badge--{{ tone }}">
+    {% if dot %}<span class="badge__dot" aria-hidden="true"></span>{% endif %}
+    {% if label %}{{ label }}{% else %}{{ status|title }}{% endif %}
+</span>
+{% else %}
+<span class="badge badge--{% if status == 'active' or status == 'published' or status == 'converted' or status == 'approved' or status == 'connected' or status == 'online' or status == 'sent' or status == 'qualified' or status == 'ok' %}success{% elif status == 'hot' or status == 'busy' or status == 'pending' or status == 'scheduled' or status == 'degraded' or status == 'replied' or status == 'opened' or status == 'high' %}warning{% elif status == 'rejected' or status == 'failed' or status == 'bounced' or status == 'unresponsive' or status == 'unauthorized' or status == 'error' %}danger{% elif status == 'warm' or status == 'contacted' or status == 'live' or status == 'new' %}info{% else %}neutral{% endif %}">
+    {% if dot %}<span class="badge__dot" aria-hidden="true"></span>{% endif %}
+    {% if label %}{{ label }}{% else %}{{ status|title }}{% endif %}
+</span>
+{% endif %}

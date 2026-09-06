@@ -1,0 +1,382 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    PAGE 2 of 6 -- AI Employees.
+    Rendered by marketing.views.agents_view, at the URL named 'agents' or
+    'conversation'.
+
+    This is a chat screen, not a control panel. The layout has three parts:
+
+      * a rail of conversations on the left, grouped by employee
+      * the active thread in the middle, with a composer at the bottom
+      * a slide-out panel on the right holding that employee's configuration
+
+    An employee produces nothing on its own. When a reply is worth acting on,
+    the reviewer presses "Send for approval" on that message, which is the only
+    route by which chat output can reach the outside world.
+{% endcomment %}
+
+{% block title %}{{ agent.name }} | AI Workforce{% endblock %}
+{% block body_class %}page-chat{% endblock %}
+{% block page_title %}AI Employees{% endblock %}
+{% block page_subtitle %}
+    Talk to an employee. Anything worth keeping goes to the approval queue.
+{% endblock %}
+
+{% block page_actions %}
+    <button class="btn btn--secondary" type="button" id="chatRailToggle">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i>
+        <span class="u-hide-mobile">Conversations</span>
+    </button>
+    {% if perms.marketing.change_aiagent %}
+    <button class="btn btn--secondary" type="button" id="agentPanelToggle"
+            aria-expanded="false" aria-controls="agentPanel">
+        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+        <span class="u-hide-mobile">Configure {{ agent.name }}</span>
+    </button>
+    {% endif %}
+    {% if perms.marketing.add_aiagent %}
+    <a href="{% url 'agent_create' %}" class="btn btn--primary">
+        <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+        <span class="u-hide-mobile">New employee</span>
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="chat" id="chatRoot"
+     data-send-url="{% url 'api_send_message' %}"
+     data-new-url="{% url 'api_new_conversation' %}"
+     data-rename-url="{% url 'api_rename_conversation' %}"
+     data-delete-url="{% url 'api_delete_conversation' %}"
+     data-submit-url="{% url 'api_submit_for_approval' %}"
+     data-conversation-id="{{ conversation.pk }}">
+
+    <!-- ------------------------------------------------------------------
+         Conversation rail
+         ------------------------------------------------------------------ -->
+    <aside class="chat__rail" id="chatRail" aria-label="Conversations">
+        <div class="chat__rail-head">
+            <span class="kpi__label">New conversation with</span>
+        </div>
+
+        <div class="chat__starters">
+            {% for option in agents %}
+            <button class="chat__starter" type="button"
+                    {% if not perms.marketing.add_conversation %}disabled{% endif %}
+                    data-new-conversation="{{ option.pk }}">
+                <span class="avatar avatar--sm" style="background: {{ option.avatar_color }};">
+                    <i class="fa-solid {{ option.avatar_icon }}" aria-hidden="true"></i>
+                </span>
+                <span class="u-grow u-text-left">
+                    <span class="chat__starter-name">{{ option.name }}</span>
+                    <span class="chat__starter-role">{{ option.role }}</span>
+                </span>
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            </button>
+            {% endfor %}
+        </div>
+
+        <div class="chat__rail-head">
+            <span class="kpi__label">Recent</span>
+        </div>
+
+        <ul class="chat__threads">
+            {% for thread in conversations %}
+            <li>
+                <a href="{% url 'conversation' thread.pk %}"
+                   class="chat__thread {% if thread.pk == conversation.pk %}is-active{% endif %}">
+                    <span class="chat__thread-dot" style="background: {{ thread.agent.avatar_color }};"
+                          aria-hidden="true"></span>
+                    <span class="u-grow" style="min-width:0;">
+                        <span class="chat__thread-title">{{ thread.title }}</span>
+                        <span class="chat__thread-meta">
+                            {{ thread.agent.name }} &middot; {{ thread.updated_at|timesince }} ago
+                        </span>
+                    </span>
+                </a>
+            </li>
+            {% empty %}
+            <li class="u-text-xs u-text-subtle" style="padding: var(--sp-3);">
+                No conversations yet. Pick an employee above to start one.
+            </li>
+            {% endfor %}
+        </ul>
+    </aside>
+
+    <!-- ------------------------------------------------------------------
+         The active thread
+         ------------------------------------------------------------------ -->
+    <section class="chat__main" aria-label="Conversation">
+
+        <header class="chat__header">
+            <span class="avatar" style="background: {{ agent.avatar_color }};">
+                <i class="fa-solid {{ agent.avatar_icon }}" aria-hidden="true"></i>
+            </span>
+            <div class="u-grow" style="min-width:0;">
+                <p class="chat__header-title u-m-0" id="chatTitle">{{ conversation.title }}</p>
+                <p class="chat__header-meta u-m-0">
+                    {{ agent.name }} &middot; {{ agent.role }}
+                    {% if agent.has_live_llm %}
+                        &middot; <code>{{ agent.llm_model.model_id }}</code>
+                    {% else %}
+                        &middot; <span class="u-text-subtle">no model assigned</span>
+                    {% endif %}
+                </p>
+            </div>
+            {% if perms.marketing.change_conversation %}
+            <button class="btn btn--ghost btn--icon" type="button" id="renameConversation"
+                    title="Rename this conversation" aria-label="Rename this conversation">
+                <i class="fa-solid fa-pen" aria-hidden="true"></i>
+            </button>
+            {% endif %}
+            {% if perms.marketing.delete_conversation %}
+            <button class="btn btn--ghost btn--icon" type="button" id="deleteConversation"
+                    title="Delete this conversation" aria-label="Delete this conversation">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
+            {% endif %}
+            {% if perms.marketing.delete_aiagent %}
+            <form method="post" action="{% url 'agent_delete' agent.pk %}"
+                  onsubmit="return confirm('Remove {{ agent.name|escapejs }} and every conversation held with them?');">
+                {% csrf_token %}
+                <button class="btn btn--ghost btn--icon" type="submit"
+                        title="Remove this employee" aria-label="Remove this employee">
+                    <i class="fa-solid fa-user-minus" aria-hidden="true"></i>
+                </button>
+            </form>
+            {% endif %}
+        </header>
+
+        {% if not agent.has_live_llm %}
+        <div class="alert alert--warning" style="margin: var(--sp-4) var(--sp-5) 0;">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            <span>
+                {{ agent.name }} has no language model assigned, so replies come from
+                built-in templates. Assign one in the configuration panel or on the
+                <a href="{% url 'configurations' %}">Configurations</a> page.
+            </span>
+        </div>
+        {% endif %}
+
+        <div class="chat__thread-body" id="chatMessages" role="log" aria-live="polite">
+            {% for message in chat_messages %}
+                {% include 'partials/_chat_message.html' with message=message agent=agent %}
+            {% empty %}
+            <div class="chat__welcome">
+                <span class="avatar avatar--lg" style="background: {{ agent.avatar_color }};">
+                    <i class="fa-solid {{ agent.avatar_icon }}" aria-hidden="true"></i>
+                </span>
+                <h2 class="u-mt-4">{{ agent.name }}</h2>
+                <p class="u-text-muted u-max-640">{{ agent.persona_description }}</p>
+
+                <div class="chat__suggestions">
+                    {% if agent.agent_type == 'content' %}
+                        <button class="chat__suggestion" type="button" data-prompt="Draft a LinkedIn post about how AI employees change marketing operations.">Draft a LinkedIn post about AI in marketing</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Write three short Instagram captions announcing our new approval workflow.">Write Instagram captions for a launch</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Rewrite my last post in a more formal tone.">Rewrite something in a formal tone</button>
+                    {% elif agent.agent_type == 'lead_finder' %}
+                        <button class="chat__suggestion" type="button" data-prompt="What buying signals should I look for in SaaS companies with 200 to 500 staff?">Which buying signals matter in SaaS?</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Describe the ideal prospect profile for a marketing automation product.">Describe an ideal prospect profile</button>
+                        <button class="chat__suggestion" type="button" data-prompt="How should I score fit against intent?">How should I score fit against intent?</button>
+                    {% elif agent.agent_type == 'outreach' %}
+                        <button class="chat__suggestion" type="button" data-prompt="Write a first-touch email to a VP of Marketing at a mid-sized SaaS company.">Write a first-touch email</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Draft a polite follow-up for someone who did not reply after ten days.">Draft a follow-up after silence</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Make my last email shorter and remove the jargon.">Make an email shorter</button>
+                    {% else %}
+                        <button class="chat__suggestion" type="button" data-prompt="Summarise the current pipeline and tell me the biggest risk.">Summarise the pipeline</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Which single action would most improve the conversion rate?">What should I do next?</button>
+                        <button class="chat__suggestion" type="button" data-prompt="Explain what the current figures actually show.">Explain the current figures</button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if perms.marketing.add_conversation %}
+        <form class="chat__composer" id="chatForm">
+            <label class="sr-only" for="chatInput">Message {{ agent.name }}</label>
+            <textarea class="form-textarea chat__input" id="chatInput" rows="1"
+                      placeholder="Message {{ agent.name }}..."
+                      autocomplete="off"></textarea>
+            <button class="btn btn--primary btn--icon" type="submit" id="chatSend"
+                    aria-label="Send message">
+                <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+            </button>
+        </form>
+        <p class="chat__hint">
+            Enter sends, Shift and Enter make a new line.
+            {{ agent.name }} publishes nothing on its own.
+        </p>
+        {% else %}
+        <div class="alert alert--info" style="margin: var(--sp-4);">
+            <i class="fa-solid fa-eye" aria-hidden="true"></i>
+            <span>
+                You have read-only access. Your role can follow conversations but
+                not start or continue one. Ask an Administrator for the Analyst
+                role or above.
+            </span>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
+
+
+{% block modals %}
+{% comment %}
+    The configuration panel. It slides in from the right and holds the same
+    AIAgentForm that used to live on a separate detail page: the system prompt,
+    the assigned language model, and the MCP tools this employee may use.
+
+    It is a real <form method="post">, so the employee can still be edited if
+    JavaScript is unavailable.
+{% endcomment %}
+<div class="panel-overlay" id="agentPanelOverlay" aria-hidden="true"></div>
+
+<aside class="panel" id="agentPanel" aria-label="Employee configuration" aria-hidden="true">
+    <header class="panel__header">
+        <h2 class="modal__title">
+            <i class="fa-solid {{ agent.avatar_icon }}" aria-hidden="true"></i>
+            Configure {{ agent.name }}
+        </h2>
+        <button class="modal__close" type="button" id="agentPanelClose"
+                aria-label="Close the panel">&times;</button>
+    </header>
+
+    <form method="post" action="{% url 'conversation' conversation.pk %}" class="panel__body">
+        {% csrf_token %}
+
+        <div class="form-row form-row--2">
+            {% include 'partials/_form_field.html' with field=agent_form.name %}
+            {% include 'partials/_form_field.html' with field=agent_form.role %}
+        </div>
+
+        {% include 'partials/_form_field.html' with field=agent_form.persona_description %}
+
+        <h3 class="card__title u-mt-6 u-mb-2">
+            <i class="fa-solid fa-message" aria-hidden="true"></i> System prompt
+        </h3>
+        {% include 'partials/_form_field.html' with field=agent_form.system_prompt label_override="Instructions sent on every message" %}
+
+        <h3 class="card__title u-mt-6 u-mb-2">
+            <i class="fa-solid fa-brain" aria-hidden="true"></i> Language model
+        </h3>
+        {% include 'partials/_form_field.html' with field=agent_form.llm_model %}
+        <div class="form-row form-row--2">
+            {% include 'partials/_form_field.html' with field=agent_form.temperature %}
+            {% include 'partials/_form_field.html' with field=agent_form.max_tokens %}
+        </div>
+
+        <h3 class="card__title u-mt-6 u-mb-2">
+            <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i> MCP tools
+        </h3>
+        {% include 'partials/_form_field.html' with field=agent_form.mcp_tools %}
+
+        <div class="form-row form-row--2 u-mt-4">
+            {% include 'partials/_form_field.html' with field=agent_form.status %}
+            {% include 'partials/_form_field.html' with field=agent_form.avatar_color %}
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn--secondary" type="button" id="agentPanelCancel">Cancel</button>
+            <button class="btn btn--primary" type="submit">
+                <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save
+            </button>
+        </div>
+    </form>
+</aside>
+
+
+{% comment %}
+    The approval dialog. A reviewer picks what kind of item the reply is, and
+    the matching draft record is created and linked so approving it later has
+    something concrete to publish.
+{% endcomment %}
+<div class="modal" id="submitApprovalModal" role="dialog" aria-modal="true"
+     aria-labelledby="submitApprovalTitle" aria-hidden="true">
+    <div class="modal__box">
+        <div class="modal__header">
+            <h2 class="modal__title" id="submitApprovalTitle">
+                <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                Send for approval
+            </h2>
+            <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+        </div>
+
+        <div class="modal__body">
+            <p class="u-text-sm u-text-muted">
+                This reply goes into the approval queue as a draft. It is published
+                only if someone approves it there.
+            </p>
+
+            <input type="hidden" id="submitMessageId">
+
+            <div class="form-field">
+                <label class="form-field__label" for="submitItemType">Submit as</label>
+                <select class="form-select" id="submitItemType">
+                    <option value="social_post">Social media post</option>
+                    <option value="email">Outreach email</option>
+                    <option value="insight">Strategy insight</option>
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="submitTitle">Title</label>
+                <input class="form-input" type="text" id="submitTitle"
+                       placeholder="A short name for the reviewer">
+            </div>
+
+            <div class="form-field" data-when-type="social_post">
+                <label class="form-field__label" for="submitPlatform">Platform</label>
+                <select class="form-select" id="submitPlatform">
+                    {% for value, label in platforms %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-field" data-when-type="email" hidden>
+                <label class="form-field__label" for="submitRecipient">Send to</label>
+                <input class="form-input" type="email" id="submitRecipient"
+                       placeholder="name@company.com" autocomplete="off">
+                <p class="form-field__hint">
+                    Pre-filled from the conversation when an address appears in it.
+                    Approving this email sends it here.
+                </p>
+            </div>
+
+            <div class="form-field" data-when-type="email" hidden>
+                <label class="form-field__label" for="submitLead">
+                    Or pick a prospect from the pipeline
+                </label>
+                <select class="form-select" id="submitLead">
+                    <option value="">Not a prospect on the pipeline</option>
+                    {% for lead in leads %}
+                    <option value="{{ lead.pk }}" data-email="{{ lead.email }}">
+                        {{ lead.full_name }} &mdash; {{ lead.company }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <p class="form-field__hint">
+                    Choosing one fills the address above and links the email to their record.
+                </p>
+            </div>
+
+            <div class="preview u-mt-4" id="submitPreview"></div>
+        </div>
+
+        <div class="modal__footer">
+            <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+            <button class="btn btn--primary" type="button" id="submitApprovalConfirm">
+                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send for approval
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/chat.js' %}" defer></script>
+{% endblock %}

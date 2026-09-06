@@ -1,0 +1,75 @@
+{% load static %}
+{% comment %}
+    base.html -- the shell for every signed-in page.
+
+    THE PROJECT CONVENTION, since a marker will ask:
+
+      * A {% block %} composes through inheritance and may contain arbitrary
+        markup, so blocks carry per-page regions: the title, subtitle, header
+        actions, main content, modals and extra scripts.
+
+      * An {% include %} receives a copy of the surrounding context but cannot
+        wrap child markup, so includes carry repeated data-driven fragments:
+        a KPI tile, a status badge, a form field, an empty state.
+
+      * A block declared *inside* an included template can never be filled by
+        the page that triggered the include. That is why the page heading is a
+        block here rather than a block inside partials/_topbar.html.
+
+    Public pages use base_public.html instead.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{% block title %}AI Workforce{% endblock %}</title>
+    {% include 'partials/_head.html' %}
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
+
+    <div class="app-shell">
+        {% include 'partials/_sidebar.html' %}
+        <div class="drawer-overlay" id="drawerOverlay" aria-hidden="true"></div>
+
+        <div class="app-shell__main">
+            {% include 'partials/_topbar.html' %}
+
+            <main class="main" id="mainContent" tabindex="-1">
+                <div class="page">
+                    <header class="page-header">
+                        <div>
+                            <h1 class="page-header__title">{% block page_title %}Dashboard{% endblock %}</h1>
+                            <p class="page-header__subtitle">{% block page_subtitle %}{% endblock %}</p>
+                        </div>
+                        <div class="page-header__actions">{% block page_actions %}{% endblock %}</div>
+                    </header>
+
+                    {% include 'partials/_messages.html' %}
+
+                    {% block content %}{% endblock %}
+                </div>
+            </main>
+        </div>
+    </div>
+
+    {% block modals %}{% endblock %}
+
+    {% include 'partials/_toast_region.html' %}
+
+    {% comment %}
+        Rendering {% csrf_token %} once here guarantees two things on every
+        page: the hidden input that App.csrfToken() reads, and the csrftoken
+        cookie itself. Without it, a page containing no form would have no
+        token, and every fetch() POST would be rejected with 403.
+    {% endcomment %}
+    <form id="csrfHolder" hidden>{% csrf_token %}</form>
+
+    <script src="{% static 'js/core.js' %}" defer></script>
+    <script src="{% static 'js/theme.js' %}" defer></script>
+    <script src="{% static 'js/nav.js' %}" defer></script>
+    <script src="{% static 'js/modal.js' %}" defer></script>
+    <script src="{% static 'js/toast.js' %}" defer></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% comment %}
+    A single-column create/edit form on a card.
+
+    INCLUDE CONTRACT
+        form           required  the bound form
+        heading        required  str
+        subheading     optional  str
+        submit_label   required  str
+        cancel_url     required  str
+        extra_fields   optional  handled by the calling template, not here
+
+    Used by agent_form.html, mcp_server_form.html and user_form.html, which
+    differ only in which fields they lay out, so the surrounding chrome is
+    written once here.
+{% endcomment %}
+<div class="u-max-640">
+    <section class="card">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">{{ heading }}</h2>
+                {% if subheading %}<p class="card__subtitle">{{ subheading }}</p>{% endif %}
+            </div>
+        </div>
+        <div class="card__body">
+            <form method="post">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                <p class="form-field__error" role="alert">{{ error }}</p>
+                {% endfor %}
+
+                {% for field in form %}
+                    {% include 'partials/_form_field.html' with field=field %}
+                {% endfor %}
+
+                <div class="form-actions">
+                    <a class="btn btn--secondary" href="{{ cancel_url }}">Cancel</a>
+                    <button class="btn btn--primary" type="submit">{{ submit_label }}</button>
+                </div>
+            </form>
+        </div>
+    </section>
+</div>

@@ -1,0 +1,351 @@
+/* ==========================================================================
+   layout.css -- the application shell only. No components live here.
+
+   Mobile first. Three min-width breakpoints:
+
+       0 - 767px    top bar with a hamburger; the sidebar is an off-canvas
+                    drawer over a dimming overlay
+       >= 768px     a permanent 72px icon rail; no drawer, no overlay
+       >= 1024px    the full 260px sidebar, collapsible back to the rail
+       >= 1440px    content capped at --content-max and centred
+   ========================================================================== */
+
+.app-shell { display: block; }
+
+.app-shell__main {
+  min-height: 100vh;
+  min-height: 100svh;   /* accounts for the iOS Safari dynamic toolbar */
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* --- Sidebar -------------------------------------------------------------
+   Fixed at every breakpoint. The drawer animates `transform`, not `left`,
+   so it composites on the GPU instead of forcing a reflow each frame.
+   ------------------------------------------------------------------------- */
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-w);
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-3);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: translateX(-100%);
+  transition: transform var(--transition), width var(--transition);
+}
+
+body.is-drawer-open .sidebar { transform: translateX(0); }
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  color: var(--color-text);
+  font-weight: var(--fw-bold);
+}
+.sidebar__brand:hover { text-decoration: none; color: var(--color-text); }
+
+.sidebar__logo {
+  flex: 0 0 34px;
+  width: 34px; height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--color-primary);
+  color: var(--color-text-onaccent);
+  font-size: var(--fs-base);
+}
+
+.sidebar__section {
+  padding: var(--sp-4) var(--sp-2) var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  color: var(--color-text-muted);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.sidebar__link:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.sidebar__link i { flex: 0 0 18px; width: 18px; text-align: center; font-size: var(--fs-base); }
+
+.sidebar__link.is-active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.sidebar__badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--color-primary);
+  color: var(--color-text-onaccent);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  line-height: 20px;
+  text-align: center;
+}
+
+.sidebar__footer {
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.sidebar__user {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  min-width: 0;
+}
+
+.sidebar__user-name {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__user-role {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+
+/* --- Drawer overlay ------------------------------------------------------
+   opacity + visibility rather than display:none, so the fade has something
+   to animate.
+   ------------------------------------------------------------------------- */
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: var(--color-overlay);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition), visibility var(--transition);
+}
+body.is-drawer-open .drawer-overlay { opacity: 1; visibility: visible; }
+
+/* Scroll lock, only ever applied below 768px. */
+body.is-drawer-open { overflow: hidden; }
+
+
+/* --- Top bar -------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--topbar-h);
+  padding: 0 var(--sp-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.topbar__title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar__spacer { margin-left: auto; }
+
+
+/* --- Main content --------------------------------------------------------- */
+
+.main { flex: 1; padding: var(--sp-5) var(--sp-4) var(--sp-10); }
+
+.page { width: 100%; max-width: var(--content-max); margin: 0 auto; }
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-6);
+}
+
+.page-header__title { font-size: var(--fs-xl); }
+
+.page-header__subtitle {
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+
+/* --- Grid helpers --------------------------------------------------------- */
+
+.grid { display: grid; gap: var(--sp-4); }
+.grid-2   { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.grid-3   { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.grid-kpi { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.grid-cards { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+
+/* --- Public and authentication shells ------------------------------------- */
+
+.public-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Wrapping matters: the brand plus three controls is wider than a 320px
+     phone, and without this the whole page gains a horizontal scrollbar. */
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.public-navbar .sidebar__brand { min-width: 0; }
+
+.auth-shell {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 120px);
+  padding: var(--sp-6) var(--sp-4);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--sp-8);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+
+/* ==========================================================================
+   >= 768px -- permanent icon rail, drawer disabled
+   ========================================================================== */
+
+@media (min-width: 768px) {
+  .sidebar {
+    width: var(--sidebar-w-rail);
+    padding: var(--sp-4) var(--sp-2);
+    transform: none;
+  }
+  .sidebar .nav-label,
+  .sidebar .sidebar__section,
+  .sidebar .sidebar__brand span,
+  .sidebar .sidebar__user-text { display: none; }
+
+  .sidebar__link { justify-content: center; padding: var(--sp-3) 0; }
+  .sidebar__badge {
+    position: absolute;
+    margin: -14px 0 0 16px;
+    min-width: 16px;
+    font-size: 10px;
+    line-height: 16px;
+  }
+  .sidebar__link { position: relative; }
+  .sidebar__user { justify-content: center; }
+
+  .drawer-overlay,
+  .topbar__hamburger { display: none; }
+
+  body.is-drawer-open { overflow: auto; }
+
+  .app-shell__main { margin-left: var(--sidebar-w-rail); }
+  .main { padding: var(--sp-6) var(--sp-6) var(--sp-12); }
+  .topbar { padding: 0 var(--sp-6); }
+
+  .page-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .page-header__actions { flex-shrink: 0; }
+}
+
+
+/* ==========================================================================
+   >= 1024px -- the full sidebar, collapsible by the user
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  .sidebar { width: var(--sidebar-w); padding: var(--sp-5) var(--sp-3); }
+  .sidebar .nav-label,
+  .sidebar .sidebar__section,
+  .sidebar .sidebar__brand span,
+  .sidebar .sidebar__user-text { display: block; }
+
+  .sidebar__link { justify-content: flex-start; padding: var(--sp-3); }
+  .sidebar__badge {
+    position: static;
+    margin: 0 0 0 auto;
+    min-width: 20px;
+    font-size: var(--fs-xs);
+    line-height: 20px;
+  }
+  .sidebar__user { justify-content: flex-start; }
+  .app-shell__main { margin-left: var(--sidebar-w); }
+
+  /* Collapsed state, persisted in localStorage by nav.js */
+  .sidebar.is-collapsed { width: var(--sidebar-w-rail); padding: var(--sp-5) var(--sp-2); }
+  .sidebar.is-collapsed .nav-label,
+  .sidebar.is-collapsed .sidebar__section,
+  .sidebar.is-collapsed .sidebar__brand span,
+  .sidebar.is-collapsed .sidebar__user-text { display: none; }
+  .sidebar.is-collapsed .sidebar__link { justify-content: center; padding: var(--sp-3) 0; }
+  .sidebar.is-collapsed .sidebar__user { justify-content: center; }
+  .sidebar.is-collapsed + .drawer-overlay + .app-shell__main,
+  body.is-sidebar-collapsed .app-shell__main { margin-left: var(--sidebar-w-rail); }
+
+  .main { padding: var(--sp-8) var(--sp-8) var(--sp-16); }
+  .topbar { padding: 0 var(--sp-8); }
+}
+
+
+/* ==========================================================================
+   >= 1440px -- extra breathing room around the capped content column
+   ========================================================================== */
+
+@media (min-width: 1440px) {
+  .main { padding-left: var(--sp-10); padding-right: var(--sp-10); }
+}

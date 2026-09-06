@@ -1,0 +1,339 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    PAGE 5 of 6 -- Configurations.
+    Rendered by marketing.views.configurations_view at the URL named
+    'configurations'.
+
+    Three providers are supported: OpenRouter, NVIDIA NIM and Ollama.
+    "Test connection" makes a real HTTP request from the server through
+    marketing/llm_client.py, which uses only urllib from the standard library.
+
+    The cascading dropdown at the top is fed by provider_model_map, rendered
+    into the page with json_script so the first selection needs no round trip.
+{% endcomment %}
+
+{% block title %}Configurations | AI Workforce{% endblock %}
+{% block body_class %}page-config{% endblock %}
+{% block page_title %}Configurations{% endblock %}
+{% block page_subtitle %}
+    API keys, endpoints and model catalogues for the language models your AI employees think with.
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Providers" value=providers|length icon="fa-server" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Configured" value=configured_count icon="fa-key" tone="success" meta="Ready to call" %}
+    {% include 'partials/_kpi_tile.html' with label="Tested online" value=online_count icon="fa-wifi" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Models available" value=total_models icon="fa-brain" tone="warning" %}
+    {% if email_configured %}
+        {% include 'partials/_kpi_tile.html' with label="Email delivery" value="Live" icon="fa-paper-plane" tone="success" meta="Approved emails are sent" %}
+    {% else %}
+        {% include 'partials/_kpi_tile.html' with label="Email delivery" value="Console" icon="fa-paper-plane" tone="warning" meta="Printed, not sent" %}
+    {% endif %}
+</div>
+
+<!-- ------------------------------------------------------------------
+     Email delivery.
+
+     Deliberately read-only: a mailbox password is not typed into this form
+     and never reaches the database. It is set in the environment before the
+     server starts, which is what the panel explains.
+     ------------------------------------------------------------------ -->
+<section class="card u-mb-6" data-email-card>
+    <div class="card__header">
+        <div class="u-flex u-items-center u-gap-3">
+            <span class="kpi__icon kpi__icon--{% if email_configured %}success{% else %}warning{% endif %}">
+                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+            </span>
+            <div>
+                <h2 class="card__title u-m-0">Email delivery</h2>
+                <p class="card__subtitle">
+                    Approving an outreach email in the queue is what sends it.
+                </p>
+            </div>
+        </div>
+
+        <span class="badge badge--{% if email_configured %}success{% else %}warning{% endif %}"
+              data-email-status>
+            {% if email_configured %}Live{% else %}Console only{% endif %}
+        </span>
+    </div>
+
+    <div class="card__body">
+        {% if email_configured %}
+        <div class="alert alert--success u-mb-4">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+            <span>
+                Approved outreach emails are delivered for real, from
+                <strong>{{ email_from }}</strong>.
+            </span>
+        </div>
+        {% else %}
+        <div class="alert alert--warning u-mb-4">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <span>
+                No mail credentials are set, so an approved email is printed to the
+                terminal instead of being sent. Nothing reaches a real inbox.
+            </span>
+        </div>
+        {% endif %}
+
+        <div class="datalist">
+            <div class="datalist__row">
+                <span class="datalist__key">Delivery method</span>
+                <span class="datalist__value">{{ email_backend }}</span>
+            </div>
+            <div class="datalist__row">
+                <span class="datalist__key">Server</span>
+                <span class="datalist__value u-mono u-text-xs">{{ email_host }}:{{ email_port }}</span>
+            </div>
+            <div class="datalist__row">
+                <span class="datalist__key">Account</span>
+                <span class="datalist__value u-break">
+                    {{ email_user|default:"Not set" }}
+                </span>
+            </div>
+        </div>
+
+        <div class="alert alert--info u-mt-4" data-email-result hidden role="status"></div>
+
+        {% if perms.marketing.test_llmprovider %}
+        <div class="u-flex u-gap-2 u-wrap u-mt-4">
+            <button class="btn btn--secondary" type="button"
+                    data-test-email data-test-url="{% url 'api_test_email' %}">
+                <i class="fa-solid fa-plug" aria-hidden="true"></i> Test connection
+            </button>
+
+            {% if email_configured and perms.marketing.change_llmprovider %}
+            <label class="sr-only" for="testEmailRecipient">Send a test message to</label>
+            <input class="form-input" id="testEmailRecipient" type="email"
+                   style="max-width: 280px;"
+                   value="{{ email_user }}" placeholder="you@example.com">
+            <button class="btn btn--primary" type="button"
+                    data-send-test-email data-send-url="{% url 'api_send_test_email' %}">
+                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send test message
+            </button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card__footer">
+        <span class="u-text-xs u-text-subtle">
+            Set before starting the server, so the password never reaches the database
+            or version control:
+            <code>$env:EMAIL_HOST_USER = "you@gmail.com"</code> and
+            <code>$env:EMAIL_HOST_PASSWORD = "your-app-password"</code>.
+            Gmail requires an
+            <a href="https://myaccount.google.com/apppasswords" target="_blank"
+               rel="noopener noreferrer">App Password</a>, not the account password.
+        </span>
+    </div>
+</section>
+
+<!-- THE CASCADING DROPDOWN -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <h2 class="card__title">
+            <i class="fa-solid fa-list-check" aria-hidden="true"></i> Model browser
+        </h2>
+    </div>
+    <div class="card__body">
+        <p class="u-text-sm u-text-muted">
+            Choose a provider and the model list below repopulates with that provider's
+            catalogue. This is the same pairing used when assigning a model to an AI employee.
+        </p>
+
+        <div class="form-row form-row--2">
+            <div class="form-field">
+                <label class="form-field__label" for="providerSelect">Provider</label>
+                <select class="form-select" id="providerSelect"
+                        data-models-url="{% url 'api_provider_models' %}">
+                    <option value="">Select a provider</option>
+                    {% for provider in providers %}
+                    <option value="{{ provider.pk }}">{{ provider.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="modelSelect">Model</label>
+                <select class="form-select" id="modelSelect" disabled>
+                    <option value="">Select a provider first</option>
+                </select>
+                <p class="form-field__hint" id="modelHint">
+                    The catalogue is stored locally, so this works with no internet connection.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# The full provider-to-model map, so the first selection needs no round trip. #}
+{{ provider_model_map|json_script:"providerModels" }}
+
+<!-- One card per provider -->
+<div class="stack">
+    {% for provider in providers %}
+    <section class="card" data-provider-card>
+        <div class="card__header">
+            <div class="u-flex u-items-center u-gap-3">
+                <span class="kpi__icon kpi__icon--primary">
+                    <i class="fa-solid {{ provider.icon }}" aria-hidden="true"></i>
+                </span>
+                <div>
+                    <h2 class="card__title u-m-0">{{ provider.label }}</h2>
+                    <p class="card__subtitle">
+                        <code>{{ provider.effective_base_url }}</code>
+                    </p>
+                </div>
+            </div>
+
+            <div class="u-flex u-gap-2 u-items-center u-wrap">
+                {% if provider.key_source == 'environment' %}
+                <span class="badge badge--info" title="Read from {{ provider.env_var_name }}">
+                    <i class="fa-solid fa-terminal" aria-hidden="true"></i> From environment
+                </span>
+                {% endif %}
+                <span class="badge badge--{% if provider.connection_status == 'online' %}success{% elif provider.connection_status == 'untested' %}neutral{% else %}danger{% endif %}"
+                      data-status-pill>{{ provider.get_connection_status_display }}</span>
+            </div>
+        </div>
+
+        <div class="card__body">
+            <div class="alert alert--info" data-test-result
+                 {% if not provider.last_test_message %}hidden{% endif %} role="status">
+                {{ provider.last_test_message }}
+                {% if provider.last_tested_at %}
+                (last tested {{ provider.last_tested_at|timesince }} ago)
+                {% endif %}
+            </div>
+
+            <form method="post" action="{% url 'configurations' %}" class="u-mt-4">
+                {% csrf_token %}
+                <input type="hidden" name="provider_id" value="{{ provider.pk }}">
+
+                <div class="form-field">
+                    <label class="form-field__label" for="key-{{ provider.pk }}">
+                        {% if provider.requires_api_key %}API key{% else %}API key (not required){% endif %}
+                    </label>
+                    <div class="secret-input">
+                        <input class="form-input" id="key-{{ provider.pk }}" type="password"
+                               name="api_key" autocomplete="off"
+                               {% if not provider.requires_api_key %}disabled
+                                   placeholder="Ollama runs locally and needs no credential"
+                               {% else %}
+                                   placeholder="Paste a key, or leave blank to keep the stored one"
+                               {% endif %}>
+                        {% if provider.requires_api_key %}
+                        <button class="btn btn--secondary btn--icon" type="button"
+                                data-reveal-target="key-{{ provider.pk }}" aria-label="Show the key">
+                            <i class="fa-solid fa-eye" aria-hidden="true"></i>
+                        </button>
+                        {% endif %}
+                    </div>
+                    <p class="form-field__hint">
+                        {% if provider.key_source == 'environment' %}
+                            Supplied by the <code>{{ provider.env_var_name }}</code> environment
+                            variable: <span class="secret-value">{{ provider.masked_key }}</span>.
+                            Nothing is stored in the database. Saving a key here would override it.
+                        {% elif provider.key_source == 'database' %}
+                            Stored key: <span class="secret-value">{{ provider.masked_key }}</span>.
+                            Leaving this blank keeps it; it is never sent back to the browser in full.
+                        {% elif provider.requires_api_key %}
+                            No key set. Either paste one here, or set
+                            <code>{{ provider.env_var_name }}</code> in the environment before
+                            starting the server, which keeps it out of the database entirely.
+                        {% else %}
+                            No credential needed.
+                        {% endif %}
+                    </p>
+                </div>
+
+                <div class="form-row form-row--2">
+                    <div class="form-field">
+                        <label class="form-field__label" for="base-{{ provider.pk }}">Base URL</label>
+                        <input class="form-input" id="base-{{ provider.pk }}" type="text"
+                               name="base_url" value="{{ provider.base_url }}"
+                               placeholder="{{ provider.effective_base_url }}">
+                        <p class="form-field__hint">Leave blank to use the provider default.</p>
+                    </div>
+
+                    <div class="form-field">
+                        <label class="form-field__label" for="name-{{ provider.pk }}">Display name</label>
+                        <input class="form-input" id="name-{{ provider.pk }}" type="text"
+                               name="display_name" value="{{ provider.display_name }}">
+                    </div>
+                </div>
+
+                <label class="form-check-row u-mb-4">
+                    <input class="form-check" type="checkbox" name="is_enabled"
+                           {% if provider.is_enabled %}checked{% endif %}>
+                    Enabled &mdash; AI employees may use this provider
+                </label>
+
+                <div class="u-flex u-gap-2 u-wrap">
+                    {% if perms.marketing.change_llmprovider %}
+                    <button class="btn btn--primary" type="submit">
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save
+                    </button>
+                    {% endif %}
+                    {% if perms.marketing.test_llmprovider %}
+                    <button class="btn btn--secondary" type="button"
+                            data-test-provider="{{ provider.pk }}"
+                            data-test-url="{% url 'api_test_provider' %}">
+                        <i class="fa-solid fa-plug" aria-hidden="true"></i> Test connection
+                    </button>
+                    <button class="btn btn--secondary" type="button"
+                            data-fetch-models="{{ provider.pk }}"
+                            data-fetch-url="{% url 'api_fetch_models' %}">
+                        <i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh models
+                    </button>
+                    {% endif %}
+                    {% if not perms.marketing.change_llmprovider %}
+                    <span class="u-text-sm u-text-muted">
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                        Only an Administrator may change these settings.
+                    </span>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+
+        <div class="card__footer">
+            <span class="u-text-sm u-text-muted">
+                {{ provider.model_count }} model{{ provider.model_count|pluralize }} in the catalogue
+                {% if provider.models_synced_at %}
+                &middot; last synced {{ provider.models_synced_at|timesince }} ago
+                {% endif %}
+            </span>
+        </div>
+    </section>
+    {% empty %}
+        {% include 'partials/_empty_state.html' with icon="fa-server" title="No providers configured" message="Sign out and back in to have the three default providers created." %}
+    {% endfor %}
+</div>
+
+<div class="alert alert--warning u-mt-6">
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+    <span>
+        <strong>On key storage:</strong> a key pasted here is held as plain text in the local
+        SQLite file. The safer route, and the one this project prefers, is to set it in the
+        environment before starting the server, so it never touches the database or version
+        control:
+        <br>
+        <code>$env:NVIDIA_API_KEY = "nvapi-..."</code> in PowerShell, or
+        <code>export NVIDIA_API_KEY="nvapi-..."</code> in Bash.
+        <br>
+        Recognised names are <code>OPENROUTER_API_KEY</code> and <code>NVIDIA_API_KEY</code>.
+        The full reasoning is documented in <code>marketing/llm_client.py</code>.
+    </span>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/config.js' %}" defer></script>
+{% endblock %}

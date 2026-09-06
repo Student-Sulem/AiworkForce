@@ -1,0 +1,21 @@
+{% comment %}
+    Shown in place of a list or table that has nothing in it.
+
+    INCLUDE CONTRACT
+        icon          required  str  FontAwesome name
+        title         required  str
+        message       optional  str
+        action_url    optional  str
+        action_label  optional  str
+
+    USAGE
+        {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing to review" message="Run an AI employee to generate work." %}
+{% endcomment %}
+<div class="empty-state">
+    <span class="empty-state__icon"><i class="fa-solid {{ icon }}" aria-hidden="true"></i></span>
+    <p class="empty-state__title u-m-0">{{ title }}</p>
+    {% if message %}<p class="empty-state__message u-m-0">{{ message }}</p>{% endif %}
+    {% if action_url and action_label %}
+    <a href="{{ action_url }}" class="btn btn--primary btn--sm">{{ action_label }}</a>
+    {% endif %}
+</div>

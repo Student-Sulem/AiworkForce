@@ -1,0 +1,14 @@
+{% comment %}
+    The light/dark switch.
+
+    theme.js fills in the icon and the aria-label on load, and persists the
+    choice to localStorage plus, when the user is signed in, to their profile
+    through the URL in data-persist-url.
+
+    Takes no include variables.
+{% endcomment %}
+<button class="btn btn--ghost btn--icon" id="themeToggle" type="button"
+        aria-pressed="false" aria-label="Switch theme"
+        {% if user.is_authenticated %}data-persist-url="{% url 'api_set_theme' %}"{% endif %}>
+    <i class="fa-solid fa-moon" aria-hidden="true"></i>
+</button>

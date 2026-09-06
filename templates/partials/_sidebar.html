@@ -1,0 +1,97 @@
+{% comment %}
+    The primary navigation.
+
+    Takes no include variables: `user` comes from Django's auth context
+    processor, and `nav_pending_count` from marketing.context_processors.
+
+    Active state is decided by request.resolver_match.url_name, which is the
+    `name=` given to each path() in marketing/urls.py.
+{% endcomment %}
+<aside class="sidebar" id="appSidebar" aria-label="Primary navigation">
+    <a href="{% url 'dashboard' %}" class="sidebar__brand">
+        <span class="sidebar__logo"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span>
+        <span>AI Workforce</span>
+    </a>
+
+    <div class="sidebar__section">Workspace</div>
+    <nav>
+        <ul>
+            <li>
+                <a href="{% url 'dashboard' %}" title="Dashboard"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}">
+                    <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
+                    <span class="nav-label">Dashboard</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'agents' %}" title="AI Employees"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'agents' or request.resolver_match.url_name == 'conversation' %}is-active{% endif %}">
+                    <i class="fa-solid fa-robot" aria-hidden="true"></i>
+                    <span class="nav-label">AI Employees</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'approvals' %}" title="Approvals"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'approvals' or request.resolver_match.url_name == 'approval_detail' %}is-active{% endif %}">
+                    <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                    <span class="nav-label">Approvals</span>
+                    <span class="sidebar__badge" id="navPendingBadge"
+                          {% if not nav_pending_count %}hidden{% endif %}>{{ nav_pending_count }}</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'users' %}" title="Users"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'users' %}is-active{% endif %}">
+                    <i class="fa-solid fa-users" aria-hidden="true"></i>
+                    <span class="nav-label">Users</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="sidebar__section">Platform</div>
+    <nav>
+        <ul>
+            <li>
+                <a href="{% url 'configurations' %}" title="Configurations"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'configurations' %}is-active{% endif %}">
+                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                    <span class="nav-label">Configurations</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'mcp_tools' %}" title="MCP Tools"
+                   class="sidebar__link {% if request.resolver_match.url_name == 'mcp_tools' or request.resolver_match.url_name == 'mcp_server_detail' %}is-active{% endif %}">
+                    <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i>
+                    <span class="nav-label">MCP Tools</span>
+                </a>
+            </li>
+            {% if user.is_staff %}
+            <li>
+                <a href="/admin/" class="sidebar__link" title="Django admin">
+                    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                    <span class="nav-label">Admin panel</span>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+
+    <div class="sidebar__footer">
+        <div class="sidebar__user">
+            <span class="avatar avatar--sm avatar--round"
+                  style="background: {{ user_profile.avatar_color|default:'#4f46e5' }};">
+                {{ user_profile.initials|default:'??' }}
+            </span>
+            <span class="sidebar__user-text u-grow">
+                <span class="sidebar__user-name">{{ user.username }}</span>
+                <span class="sidebar__user-role">{{ user_profile.access_level|default:'Member' }}</span>
+            </span>
+        </div>
+        <a href="{% url 'logout' %}" class="btn btn--secondary btn--sm btn--block"
+           title="Sign out">
+            <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+            <span class="nav-label">Sign out</span>
+        </a>
+    </div>
+</aside>

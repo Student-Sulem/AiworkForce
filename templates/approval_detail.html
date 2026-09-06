@@ -1,0 +1,238 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    One queued item in full, with its audit trail.
+    Rendered by marketing.views.approval_detail_view at the URL named
+    'approval_detail'.
+
+    A reviewer may edit a drafted social post before approving it. That reuses
+    SocialPostForm, the same ModelForm the old Social Posts page used.
+{% endcomment %}
+
+{% block title %}{{ approval.title|truncatechars:40 }} | Approvals{% endblock %}
+{% block body_class %}page-approvals{% endblock %}
+{% block page_title %}{{ approval.title }}{% endblock %}
+{% block page_subtitle %}
+    {{ approval.get_item_type_display }}
+    &middot; produced by {{ approval.agent.name|default:"the system" }}
+    &middot; raised {{ approval.requested_at|timesince }} ago
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'approvals' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Back to the queue
+    </a>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-2">
+
+    <div class="stack">
+
+        <!-- What the employee produced -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid {{ approval.icon }}" aria-hidden="true"></i> Generated content
+                </h2>
+                {% include 'partials/_status_badge.html' with status=approval.status label=approval.get_status_display dot=True %}
+            </div>
+            <div class="card__body">
+                <div class="preview preview--full">{{ approval.payload_preview }}</div>
+            </div>
+            <div class="card__footer">
+                <span class="u-text-sm u-text-muted">
+                    {{ approval.get_generation_source_display }}
+                    {% if approval.llm_model_used %}
+                        &middot; <code>{{ approval.llm_model_used }}</code>
+                    {% endif %}
+                    {% if approval.tokens_used %}&middot; {{ approval.tokens_used }} tokens{% endif %}
+                </span>
+            </div>
+        </section>
+
+        <!-- Editing a drafted post before approving it -->
+        {% if edit_form and approval.is_pending and perms.marketing.change_socialpost %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit before approving
+                </h2>
+            </div>
+            <div class="card__body">
+                <form method="post" action="{% url 'approval_detail' approval.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="edit">
+                    {% include 'partials/_form_field.html' with field=edit_form.title %}
+                    {% include 'partials/_form_field.html' with field=edit_form.content %}
+                    <div class="form-row form-row--2">
+                        {% include 'partials/_form_field.html' with field=edit_form.platform %}
+                        {% include 'partials/_form_field.html' with field=edit_form.campaign %}
+                    </div>
+                    {% include 'partials/_form_field.html' with field=edit_form.hashtags %}
+                    <div class="form-actions">
+                        <button class="btn btn--secondary" type="submit">
+                            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save draft
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+
+    <div class="stack">
+
+        <!-- The decision -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-gavel" aria-hidden="true"></i> Decision
+                </h2>
+            </div>
+            <div class="card__body">
+                {% if approval.is_pending and not perms.marketing.approve_approvalrequest %}
+                <div class="alert alert--info">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    <span>
+                        This is waiting for a decision, but your role cannot make one.
+                        Approving is a Manager or Administrator capability.
+                    </span>
+                </div>
+                {% elif approval.is_pending %}
+                <p class="u-text-sm u-text-muted">
+                    Approving publishes the underlying record. Rejecting leaves it inert and
+                    records your reason. Either way an audit entry is written.
+                </p>
+
+                <form method="post" action="{% url 'approval_detail' approval.pk %}" class="u-mt-4">
+                    {% csrf_token %}
+                    <input type="hidden" name="approval_id" value="{{ approval.pk }}">
+
+                    <div class="form-field">
+                        <span class="form-field__label">Outcome</span>
+                        {{ decision_form.decision }}
+                        {% for error in decision_form.decision.errors %}
+                        <p class="form-field__error" role="alert">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+
+                    {% include 'partials/_form_field.html' with field=decision_form.reason hint="Required when rejecting. ApprovalDecisionForm.clean() enforces this server-side." %}
+
+                    <div class="form-actions">
+                        <button class="btn btn--primary" type="submit">
+                            <i class="fa-solid fa-check" aria-hidden="true"></i> Record decision
+                        </button>
+                    </div>
+                </form>
+                {% else %}
+                <div class="alert alert--{% if approval.status == 'approved' %}success{% else %}danger{% endif %}">
+                    <i class="fa-solid {% if approval.status == 'approved' %}fa-circle-check{% else %}fa-circle-xmark{% endif %}"
+                       aria-hidden="true"></i>
+                    <span>{{ approval.decision_summary }}</span>
+                </div>
+                {% if approval.decision_reason %}
+                <p class="u-text-sm u-mt-4"><strong>Reason:</strong> {{ approval.decision_reason }}</p>
+                {% endif %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- What is actually under review -->
+        {% if approval.target %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-link" aria-hidden="true"></i> Linked record
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Type</span>
+                        <span class="datalist__value">{{ approval.get_item_type_display }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Record</span>
+                        <span class="datalist__value">{{ approval.target }}</span>
+                    </div>
+                    {% if approval.social_post %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Platform</span>
+                        <span class="datalist__value">{{ approval.social_post.get_platform_display }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Current state</span>
+                        <span class="datalist__value">
+                            {% include 'partials/_status_badge.html' with status=approval.social_post.status label=approval.social_post.get_status_display %}
+                        </span>
+                    </div>
+                    {% elif approval.email_outreach %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Recipient</span>
+                        <span class="datalist__value u-break">{{ approval.email_outreach.lead.email }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Current state</span>
+                        <span class="datalist__value">
+                            {% include 'partials/_status_badge.html' with status=approval.email_outreach.status label=approval.email_outreach.get_status_display %}
+                        </span>
+                    </div>
+                    {% elif approval.lead %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Score</span>
+                        <span class="datalist__value">
+                            {{ approval.lead.lead_score }} ({{ approval.lead.get_score_tier_display }})
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Current state</span>
+                        <span class="datalist__value">
+                            {% include 'partials/_status_badge.html' with status=approval.lead.status label=approval.lead.get_status_display %}
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Audit trail -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Audit trail
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">When</th>
+                                <th scope="col">Who</th>
+                                <th scope="col">Action</th>
+                                <th scope="col">Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in audit_entries %}
+                            <tr>
+                                <td data-label="When">{{ entry.created_at|date:"j M Y, H:i" }}</td>
+                                <td data-label="Who">{{ entry.actor.username|default:"system" }}</td>
+                                <td data-label="Action">
+                                    {% include 'partials/_status_badge.html' with status=entry.action label=entry.get_action_display %}
+                                </td>
+                                <td data-label="Note">{{ entry.note|default:"&mdash;" }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="u-text-center u-text-subtle">No entries.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

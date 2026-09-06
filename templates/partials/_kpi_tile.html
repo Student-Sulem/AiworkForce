@@ -1,0 +1,36 @@
+{% comment %}
+    A single headline figure.
+
+    INCLUDE CONTRACT
+        label     required   str   e.g. "Total prospects"
+        value     required   any   the figure itself
+        icon      required   str   FontAwesome name without the style prefix
+        tone      optional   str   primary (default) | success | warning | danger | info
+        meta      optional   str   small caption under the value
+        delta     optional   str   e.g. "+12.5%"
+        delta_up  optional   bool  true for green and an up arrow
+        href      optional   str   renders the tile as a link
+
+    USAGE
+        {% include 'partials/_kpi_tile.html' with label="Total prospects" value=total_leads icon="fa-users" tone="primary" %}
+{% endcomment %}
+{% if href %}<a href="{{ href }}" class="kpi">{% else %}<div class="kpi">{% endif %}
+    <span class="kpi__icon kpi__icon--{{ tone|default:'primary' }}">
+        <i class="fa-solid {{ icon }}" aria-hidden="true"></i>
+    </span>
+    <span class="kpi__body">
+        <span class="kpi__label">{{ label }}</span>
+        <span class="kpi__value">{{ value }}</span>
+        {% if delta or meta %}
+        <span class="kpi__meta">
+            {% if delta %}
+            <span class="kpi__delta {% if delta_up %}kpi__delta--up{% else %}kpi__delta--down{% endif %}">
+                <i class="fa-solid {% if delta_up %}fa-arrow-up{% else %}fa-arrow-down{% endif %}"
+                   aria-hidden="true"></i> {{ delta }}
+            </span>
+            {% endif %}
+            {% if meta %}{{ meta }}{% endif %}
+        </span>
+        {% endif %}
+    </span>
+{% if href %}</a>{% else %}</div>{% endif %}

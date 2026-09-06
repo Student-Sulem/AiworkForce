@@ -1,0 +1,41 @@
+{% comment %}
+    Page navigation for any view that uses django.core.paginator.Paginator.
+
+    INCLUDE CONTRACT
+        page_obj      required  Page   the object returned by Paginator.get_page()
+        querystring   optional  str    the other query parameters, without "page=",
+                                       e.g. "status=pending&q=ada"
+
+    USAGE
+        {% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
+{% endcomment %}
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+    {% if page_obj.has_previous %}
+    <a class="btn btn--secondary btn--sm"
+       href="?page={{ page_obj.previous_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Previous
+    </a>
+    {% else %}
+    <span class="btn btn--secondary btn--sm" aria-disabled="true" style="opacity:.5;">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Previous
+    </span>
+    {% endif %}
+
+    <span class="pagination__info">
+        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        &middot; {{ page_obj.paginator.count }} item{{ page_obj.paginator.count|pluralize }}
+    </span>
+
+    {% if page_obj.has_next %}
+    <a class="btn btn--secondary btn--sm"
+       href="?page={{ page_obj.next_page_number }}{% if querystring %}&{{ querystring }}{% endif %}">
+        Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </a>
+    {% else %}
+    <span class="btn btn--secondary btn--sm" aria-disabled="true" style="opacity:.5;">
+        Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </span>
+    {% endif %}
+</nav>
+{% endif %}

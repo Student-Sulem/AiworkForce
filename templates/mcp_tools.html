@@ -1,0 +1,190 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    PAGE 6 of 6 -- MCP Tools.
+    Rendered by marketing.views.mcp_tools_view at the URL named 'mcp_tools'.
+
+    Seven Model Context Protocol servers are modelled: Gmail, Instagram,
+    Database, Memory (Knowledge Graph), Sequential Thinking, Spotify and
+    LinkedIn.
+
+    "Test" runs marketing/mcp_client.simulate_handshake, which evaluates the
+    stored configuration the way an MCP `initialize` exchange would. It does
+    not launch a process or open a socket, and the page says so.
+{% endcomment %}
+
+{% block title %}MCP Tools | AI Workforce{% endblock %}
+{% block body_class %}page-mcp{% endblock %}
+{% block page_title %}MCP Tools{% endblock %}
+{% block page_subtitle %}
+    Model Context Protocol servers, and the capabilities each one gives your AI employees.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'agents' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-robot" aria-hidden="true"></i> Attach to an employee
+    </a>
+    {% if perms.marketing.add_mcpserver %}
+    <a href="{% url 'mcp_server_create' %}" class="btn btn--primary">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Register a server
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Servers" value=total_servers icon="fa-plug" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Connected" value=online_count icon="fa-circle-check" tone="success" %}
+    {% include 'partials/_kpi_tile.html' with label="Enabled" value=enabled_servers icon="fa-toggle-on" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Tools available" value=enabled_tools icon="fa-screwdriver-wrench" tone="warning" meta=total_tools|stringformat:"s"|add:" defined in total" %}
+</div>
+
+<div class="alert alert--info u-mb-4">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span>
+        Connection details are stored and validated here. This build models MCP within Django
+        and does not launch server processes, so "Test" reports whether the stored configuration
+        is complete rather than opening a live session.
+    </span>
+</div>
+
+<div class="toolbar">
+    <div class="toolbar__search">
+        <label class="sr-only" for="mcpSearch">Search servers</label>
+        <input class="form-input" id="mcpSearch" type="search"
+               placeholder="Search servers and tools">
+    </div>
+    <div class="toolbar__filters">
+        <label class="sr-only" for="mcpCategoryFilter">Filter by category</label>
+        <select class="form-select" id="mcpCategoryFilter">
+            <option value="all">All categories</option>
+            {% for value, label in categories %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="grid grid-cards">
+    {% for server in servers %}
+    <article class="card mcp-card" data-server-card data-category="{{ server.category }}">
+        <div class="card__body">
+
+            <div class="u-flex u-items-start u-gap-3 u-mb-4">
+                <span class="avatar avatar--lg" style="background: {{ server.color }};">
+                    <i class="fa-{% if server.icon == 'fa-instagram' or server.icon == 'fa-spotify' or server.icon == 'fa-linkedin' %}brands{% else %}solid{% endif %} {{ server.icon }}"
+                       aria-hidden="true"></i>
+                </span>
+                <div class="u-grow">
+                    <h2 class="card__title u-m-0">{{ server.name }}</h2>
+                    <p class="card__subtitle">{{ server.get_category_display }}</p>
+                </div>
+                <span class="badge badge--{% if server.connection_status == 'connected' %}success{% elif server.connection_status == 'degraded' %}warning{% elif server.connection_status == 'failed' %}danger{% else %}neutral{% endif %}"
+                      data-status-pill>{{ server.get_connection_status_display }}</span>
+            </div>
+
+            <p class="u-text-sm u-text-muted">{{ server.description }}</p>
+
+            <div class="datalist u-mt-4">
+                <div class="datalist__row">
+                    <span class="datalist__key">Transport</span>
+                    <span class="datalist__value">{{ server.get_transport_display }}</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Target</span>
+                    <span class="datalist__value u-mono u-text-xs u-break">{{ server.target_label }}</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Credential</span>
+                    <span class="datalist__value">
+                        {% if not server.requires_credential %}
+                            <span class="u-text-subtle">Not required</span>
+                        {% elif server.auth_token %}
+                            <span style="color: var(--color-success);">Stored</span>
+                        {% else %}
+                            <span style="color: var(--color-warning);">Not set</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Protocol</span>
+                    <span class="datalist__value u-mono u-text-xs">{{ server.protocol_version }}</span>
+                </div>
+            </div>
+
+            <div class="u-mt-4">
+                <p class="kpi__label u-mb-2">
+                    Capabilities ({{ server.enabled_tool_count }} of {{ server.tool_count }} enabled)
+                </p>
+                <div class="chip-set">
+                    {% for tool in server.tools.all %}
+                    <span class="chip chip--mono {% if tool.is_destructive %}chip--danger{% endif %}"
+                          title="{{ tool.description }}">
+                        {% if tool.is_destructive %}
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        {% endif %}
+                        {{ tool.tool_name }}
+                    </span>
+                    {% empty %}
+                    <span class="u-text-xs u-text-subtle">No tools defined.</span>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="alert alert--info u-mt-4" data-test-result
+                 {% if not server.last_status_message %}hidden{% endif %} role="status">
+                {{ server.last_status_message }}
+            </div>
+        </div>
+
+        <div class="card__footer">
+            <label class="switch">
+                <input class="switch__input" type="checkbox"
+                       {% if server.is_enabled %}checked{% endif %}
+                       {% if not perms.marketing.change_mcpserver %}disabled{% endif %}
+                       data-toggle-server="{{ server.pk }}"
+                       data-server-name="{{ server.name }}"
+                       data-toggle-url="{% url 'api_toggle_mcp_server' %}">
+                <span class="switch__track"></span>
+                <span class="switch__label">Enabled</span>
+            </label>
+
+            <div class="u-grow"></div>
+
+            {% if perms.marketing.test_mcpserver %}
+            <button class="btn btn--secondary btn--sm" type="button"
+                    data-test-server="{{ server.pk }}"
+                    data-test-url="{% url 'api_test_mcp_server' %}">
+                <i class="fa-solid fa-plug" aria-hidden="true"></i> Test
+            </button>
+            {% endif %}
+            {% if perms.marketing.delete_mcpserver %}
+            <form method="post" action="{% url 'mcp_server_delete' server.pk %}"
+                  onsubmit="return confirm('Remove {{ server.name|escapejs }} and all of its tools?');">
+                {% csrf_token %}
+                <button class="btn btn--ghost btn--sm" type="submit"
+                        title="Remove this server">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+            </form>
+            {% endif %}
+            <a href="{% url 'mcp_server_detail' server.pk %}" class="btn btn--ghost btn--sm">
+                Configure <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </a>
+        </div>
+    </article>
+    {% empty %}
+        {% include 'partials/_empty_state.html' with icon="fa-plug" title="No MCP servers" message="Sign out and back in to have the seven default servers created." %}
+    {% endfor %}
+</div>
+
+<div id="mcpEmptyState" hidden>
+    {% include 'partials/_empty_state.html' with icon="fa-magnifying-glass" title="No servers match" message="Try a different search term or category." %}
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/mcp.js' %}" defer></script>
+{% endblock %}

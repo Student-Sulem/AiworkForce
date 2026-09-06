@@ -1,0 +1,70 @@
+/* ==========================================================================
+   utilities.css -- a deliberately small utility layer.
+
+   These exist to replace the inline style="..." attributes that used to be
+   scattered through the templates. The set is capped at roughly 35 classes:
+   anything more expressive belongs in components.css as a named component.
+
+   Loaded last so a utility always wins over a component rule.
+   ========================================================================== */
+
+/* --- Flex ----------------------------------------------------------------- */
+.u-flex          { display: flex; }
+.u-flex-col      { display: flex; flex-direction: column; }
+.u-flex-between  { display: flex; align-items: center; justify-content: space-between; }
+.u-flex-center   { display: flex; align-items: center; justify-content: center; }
+.u-items-center  { align-items: center; }
+.u-items-start   { align-items: flex-start; }
+.u-justify-end   { justify-content: flex-end; }
+.u-wrap          { flex-wrap: wrap; }
+.u-grow          { flex: 1; min-width: 0; }
+
+/* --- Gap ------------------------------------------------------------------ */
+.u-gap-1 { gap: var(--sp-1); }
+.u-gap-2 { gap: var(--sp-2); }
+.u-gap-3 { gap: var(--sp-3); }
+.u-gap-4 { gap: var(--sp-4); }
+.u-gap-6 { gap: var(--sp-6); }
+
+/* --- Spacing -------------------------------------------------------------- */
+.u-mt-2 { margin-top: var(--sp-2); }
+.u-mt-4 { margin-top: var(--sp-4); }
+.u-mt-6 { margin-top: var(--sp-6); }
+.u-mb-2 { margin-bottom: var(--sp-2); }
+.u-mb-4 { margin-bottom: var(--sp-4); }
+.u-mb-6 { margin-bottom: var(--sp-6); }
+.u-m-0  { margin: 0; }
+
+/* --- Sizing --------------------------------------------------------------- */
+.u-w-full   { width: 100%; }
+.u-max-420  { max-width: 420px; }
+.u-max-640  { max-width: 640px; }
+
+/* --- Text ----------------------------------------------------------------- */
+.u-text-muted  { color: var(--color-text-muted); }
+.u-text-subtle { color: var(--color-text-subtle); }
+.u-text-center { text-align: center; }
+.u-text-right  { text-align: right; }
+.u-text-sm     { font-size: var(--fs-sm); }
+.u-text-xs     { font-size: var(--fs-xs); }
+.u-semibold    { font-weight: var(--fw-semibold); }
+.u-mono        { font-family: var(--font-mono); }
+.u-break       { word-break: break-word; }
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Clamp a paragraph to three lines, used on employee persona text. */
+.u-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- Visibility ----------------------------------------------------------- */
+@media (max-width: 767px)  { .u-hide-mobile  { display: none !important; } }
+@media (min-width: 768px)  { .u-hide-desktop { display: none !important; } }

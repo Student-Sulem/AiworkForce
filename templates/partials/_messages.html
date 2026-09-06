@@ -1,0 +1,22 @@
+{% comment %}
+    Renders Django's messages framework.
+
+    Takes no include variables; `messages` comes from the messages context
+    processor. The tag-to-tone mapping is configured once in
+    marketpulse/settings.py under MESSAGE_TAGS, so this template only has to
+    read message.tags rather than translate level numbers itself.
+{% endcomment %}
+{% if messages %}
+<div class="alert-stack">
+    {% for message in messages %}
+    <div class="alert alert--{{ message.tags|default:'info' }}" role="alert">
+        <i class="fa-solid
+            {% if message.tags == 'success' %}fa-circle-check
+            {% elif message.tags == 'danger' %}fa-circle-exclamation
+            {% elif message.tags == 'warning' %}fa-triangle-exclamation
+            {% else %}fa-circle-info{% endif %}" aria-hidden="true"></i>
+        <span>{{ message }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}

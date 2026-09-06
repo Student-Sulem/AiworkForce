@@ -1,0 +1,40 @@
+{% comment %}
+    The sticky top bar: mobile hamburger, desktop collapse control, the brand
+    name, and the theme toggle.
+
+    Takes no include variables.
+
+    NOTE: this partial deliberately contains no {% block %}. A block declared
+    inside an included template cannot be overridden by the page that caused
+    the include, so it would silently never fill. Per-page text belongs in a
+    block in base.html itself -- which is what page_title does.
+
+    The brand is shown here because below 768px the sidebar is off-canvas, so
+    its own brand is not visible.
+{% endcomment %}
+<header class="topbar">
+    <button class="btn btn--ghost btn--icon topbar__hamburger" id="drawerToggle"
+            type="button" aria-expanded="false" aria-controls="appSidebar"
+            aria-label="Open navigation">
+        <i class="fa-solid fa-bars" aria-hidden="true"></i>
+    </button>
+
+    <button class="btn btn--ghost btn--icon u-hide-mobile" id="sidebarCollapse"
+            type="button" aria-expanded="true" aria-controls="appSidebar"
+            aria-label="Collapse the sidebar">
+        <i class="fa-solid fa-bars-staggered" aria-hidden="true"></i>
+    </button>
+
+    <span class="topbar__title u-hide-desktop">AI Workforce</span>
+
+    <div class="topbar__spacer"></div>
+
+    {% if nav_pending_count %}
+    <a href="{% url 'approvals' %}" class="badge badge--warning" title="Items awaiting review">
+        <i class="fa-solid fa-clock" aria-hidden="true"></i>
+        {{ nav_pending_count }} pending
+    </a>
+    {% endif %}
+
+    {% include 'partials/_theme_toggle.html' %}
+</header>

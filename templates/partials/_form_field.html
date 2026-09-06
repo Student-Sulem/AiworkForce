@@ -1,0 +1,31 @@
+{% comment %}
+    One labelled form field, with its help text and any validation errors.
+
+    INCLUDE CONTRACT
+        field           required  bound form field
+        label_override  optional  str   replaces field.label
+        hint            optional  str   replaces field.help_text
+        wrapper_class   optional  str   extra class on the wrapper
+
+    The widget itself already carries its CSS class, set in marketing/forms.py,
+    so {{ field }} renders correctly styled markup with no extra work here.
+
+    USAGE
+        {% include 'partials/_form_field.html' with field=form.name %}
+{% endcomment %}
+<div class="form-field {{ wrapper_class }}">
+    <label class="form-field__label" for="{{ field.id_for_label }}">
+        {{ label_override|default:field.label }}
+        {% if field.field.required %}<span class="form-field__required" aria-hidden="true">*</span>{% endif %}
+    </label>
+
+    {{ field }}
+
+    {% if hint or field.help_text %}
+    <p class="form-field__hint">{{ hint|default:field.help_text }}</p>
+    {% endif %}
+
+    {% for error in field.errors %}
+    <p class="form-field__error" role="alert">{{ error }}</p>
+    {% endfor %}
+</div>

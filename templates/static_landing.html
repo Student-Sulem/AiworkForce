@@ -1,0 +1,319 @@
+{% extends 'base_public.html' %}
+{% load static %}
+{% comment %}
+    The public landing page.
+    Rendered by marketing.views.landing_page at the URL named 'landing'.
+    A signed-in visitor is redirected to the dashboard instead.
+
+    This page used to be a standalone document with its own :root token block
+    and its own copies of .btn, .navbar and .section. Those duplicated -- and
+    contradicted -- the application stylesheet. It now extends the shared
+    public shell and its remaining rules live in static/css/pages.css,
+    namespaced under .landing, so there is one source of truth for colour.
+{% endcomment %}
+
+{% block title %}AI Workforce | Autonomous marketing employees{% endblock %}
+{% block body_class %}landing{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="hero">
+    <div class="hero__inner">
+        <span class="eyebrow">
+            <i class="fa-solid fa-sparkles" aria-hidden="true"></i> Human-in-the-loop by design
+        </span>
+
+        <h1>Marketing employees that <span class="hero__accent">never sleep</span>,
+            and never publish without you</h1>
+
+        <p>
+            Four AI specialists draft your social posts, source your prospects, write your
+            outreach and read your numbers. Every single thing they produce waits in an
+            approval queue until a person says yes.
+        </p>
+
+        <div class="hero__actions">
+            <a href="{% url 'register' %}" class="btn btn--primary btn--lg">
+                <i class="fa-solid fa-rocket" aria-hidden="true"></i> Create your workspace
+            </a>
+            <a href="{% url 'login' %}" class="btn btn--secondary btn--lg">Sign in</a>
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="stat__value">4</div>
+                <div class="stat__label">AI employees per workspace</div>
+            </div>
+            <div class="stat">
+                <div class="stat__value">7</div>
+                <div class="stat__label">MCP tool servers</div>
+            </div>
+            <div class="stat">
+                <div class="stat__value">3</div>
+                <div class="stat__label">Language model providers</div>
+            </div>
+            <div class="stat">
+                <div class="stat__value">100%</div>
+                <div class="stat__label">Output reviewed by a person</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- How it works -->
+<section class="section">
+    <div class="section__head">
+        <span class="eyebrow">How it works</span>
+        <h2>Agents propose. People dispose.</h2>
+        <p class="lede">
+            Autonomy without oversight is a liability. This platform separates the two
+            explicitly: employees generate, humans decide, and every decision is recorded.
+        </p>
+    </div>
+
+    <div class="card-grid">
+        <article class="feature">
+            <span class="feature__step">1</span>
+            <h3>Configure an employee</h3>
+            <p>
+                Give each AI employee a system prompt, assign it a language model from
+                OpenRouter, NVIDIA NIM or a local Ollama instance, and attach the MCP tools
+                it is permitted to use.
+            </p>
+        </article>
+
+        <article class="feature">
+            <span class="feature__step">2</span>
+            <h3>Let it work</h3>
+            <p>
+                The employee calls its model, consults its tools, and produces a draft: a
+                social post, an outreach email, a scored prospect or a strategy insight.
+                Nothing is published.
+            </p>
+        </article>
+
+        <article class="feature">
+            <span class="feature__step">3</span>
+            <h3>Review and decide</h3>
+            <p>
+                The draft lands in your approval queue. Approve it and it goes live; reject
+                it and you record why. Either way the audit trail keeps the whole history.
+            </p>
+        </article>
+    </div>
+</section>
+
+<!-- The employees -->
+<section class="section">
+    <div class="section__head">
+        <span class="eyebrow">Your workforce</span>
+        <h2>Four specialists, provisioned on sign-up</h2>
+        <p class="lede">
+            Each arrives with a written system prompt and a default set of MCP tools.
+            Every part of that is editable.
+        </p>
+    </div>
+
+    <div class="card-grid">
+        <article class="feature">
+            <span class="feature__icon" style="background:#ede9fe; color:#7c3aed;">
+                <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
+            </span>
+            <h3>Sophia</h3>
+            <p>
+                Social content creator. Writes platform-native posts for LinkedIn, X,
+                Instagram and Facebook, and picks the hashtags.
+            </p>
+        </article>
+
+        <article class="feature">
+            <span class="feature__icon" style="background:#cffafe; color:#0891b2;">
+                <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+            </span>
+            <h3>Hunter</h3>
+            <p>
+                Lead finder. Sources high-intent prospects, scores buying signals, and
+                explains why each one is worth a conversation.
+            </p>
+        </article>
+
+        <article class="feature">
+            <span class="feature__icon" style="background:#d1fae5; color:#047857;">
+                <i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i>
+            </span>
+            <h3>Aria</h3>
+            <p>
+                Outreach manager. Drafts short, specific first-touch email and follow-up
+                sequences that reference something real about the recipient.
+            </p>
+        </article>
+
+        <article class="feature">
+            <span class="feature__icon" style="background:#fef3c7; color:#b45309;">
+                <i class="fa-solid fa-chart-pie" aria-hidden="true"></i>
+            </span>
+            <h3>Atlas</h3>
+            <p>
+                Strategy officer. Reads the pipeline, names the biggest risk, and
+                recommends exactly one next action.
+            </p>
+        </article>
+    </div>
+</section>
+
+<!-- Tooling -->
+<section class="section">
+    <div class="section__head">
+        <span class="eyebrow">Model Context Protocol</span>
+        <h2>Seven tool servers, attachable per employee</h2>
+        <p class="lede">
+            Capabilities are granted deliberately. A tool that writes to the outside world
+            is marked as such, and anything produced with one always needs approval.
+        </p>
+    </div>
+
+    <div class="card-grid">
+        <article class="feature">
+            <span class="feature__icon"><i class="fa-solid fa-envelope" aria-hidden="true"></i></span>
+            <h3>Communication</h3>
+            <p>Gmail: search a mailbox, read messages, compose drafts and send email.</p>
+        </article>
+        <article class="feature">
+            <span class="feature__icon"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i></span>
+            <h3>Social</h3>
+            <p>Instagram and LinkedIn: publish updates, research people, read engagement.</p>
+        </article>
+        <article class="feature">
+            <span class="feature__icon"><i class="fa-solid fa-database" aria-hidden="true"></i></span>
+            <h3>Data</h3>
+            <p>Database and Memory: run queries, and keep a persistent knowledge graph.</p>
+        </article>
+        <article class="feature">
+            <span class="feature__icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></span>
+            <h3>Reasoning and media</h3>
+            <p>Sequential Thinking for structured problem solving, and Spotify for catalogue search.</p>
+        </article>
+    </div>
+</section>
+
+<!-- ROI calculator -->
+<section class="section">
+    <div class="section__head">
+        <span class="eyebrow">Estimate</span>
+        <h2>What would this give your team back?</h2>
+    </div>
+
+    <div class="roi">
+        <label class="form-field__label" for="roiHours">
+            Hours your team spends on repeatable marketing work each week:
+            <strong id="roiHoursValue">20</strong>
+        </label>
+        <input class="roi__slider" id="roiHours" type="range"
+               min="5" max="60" step="5" value="20"
+               aria-describedby="roiHoursValue">
+
+        <div class="roi__result">
+            <div class="stat">
+                <div class="stat__value" id="roiHoursSaved">12</div>
+                <div class="stat__label">Hours returned each week</div>
+            </div>
+            <div class="stat">
+                <div class="stat__value" id="roiDaysSaved">78</div>
+                <div class="stat__label">Working days a year</div>
+            </div>
+            <div class="stat">
+                <div class="stat__value" id="roiReviewTime">2</div>
+                <div class="stat__label">Hours a week reviewing output</div>
+            </div>
+        </div>
+
+        <p class="u-text-xs u-text-subtle u-mt-4 u-m-0">
+            An illustration based on a 60% automation rate, not a guarantee.
+        </p>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="section">
+    <div class="section__head">
+        <span class="eyebrow">Questions</span>
+        <h2>Frequently asked</h2>
+    </div>
+
+    <div class="faq">
+        <details class="faq__item">
+            <summary class="faq__question">Can an AI employee publish something on its own?</summary>
+            <div class="faq__answer">
+                No. Every runner writes its output as a draft and raises an approval request.
+                The record only becomes live when a person approves it, and that single
+                transition is the one place in the codebase where publication happens.
+            </div>
+        </details>
+
+        <details class="faq__item">
+            <summary class="faq__question">Which language models are supported?</summary>
+            <div class="faq__answer">
+                OpenRouter, NVIDIA NIM and Ollama. Each provider has its own API key,
+                endpoint and model catalogue, and each AI employee is assigned one specific
+                model. If no model is reachable, the employee falls back to a built-in
+                template so a run never fails outright.
+            </div>
+        </details>
+
+        <details class="faq__item">
+            <summary class="faq__question">Do I need an API key to try it?</summary>
+            <div class="faq__answer">
+                No. The model catalogue is seeded locally, and every employee works from
+                built-in templates until you assign it a live model. Add a key when you
+                want real generation.
+            </div>
+        </details>
+
+        <details class="faq__item">
+            <summary class="faq__question">What exactly does the MCP layer do?</summary>
+            <div class="faq__answer">
+                It records and validates each tool server's connection details, tracks the
+                capabilities each one advertises, and controls which employees may use them.
+                This build models the protocol inside the application rather than launching
+                external server processes.
+            </div>
+        </details>
+
+        <details class="faq__item">
+            <summary class="faq__question">Is there an audit trail?</summary>
+            <div class="faq__answer">
+                Yes. Every approval records who decided, when, and why, and a separate audit
+                log keeps the full history including the original submission and any edits
+                made before approval.
+            </div>
+        </details>
+    </div>
+</section>
+
+<!-- Call to action -->
+<section class="section">
+    <div class="cta">
+        <h2>Put four AI employees to work</h2>
+        <p>
+            Your workspace arrives fully provisioned: four employees, three model providers
+            with populated catalogues, and seven MCP tool servers.
+        </p>
+        <a href="{% url 'register' %}" class="btn btn--primary btn--lg">
+            <i class="fa-solid fa-rocket" aria-hidden="true"></i> Get started
+        </a>
+    </div>
+</section>
+
+<footer class="footer">
+    <p class="u-m-0">
+        AI Workforce &middot; A Django coursework project demonstrating models, views,
+        URLs, templates and a customised admin.
+    </p>
+</footer>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/landing.js' %}" defer></script>
+{% endblock %}

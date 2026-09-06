@@ -1,0 +1,260 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    PAGE 4 of 6 -- Users.
+    Rendered by marketing.views.users_view at the URL named 'users'.
+
+    The page is readable by any signed-in user. The controls that change an
+    account appear only when `can_manage` is true, and the JSON endpoints
+    behind them re-check request.user.is_staff, so hiding a button is a
+    convenience and not the security boundary.
+{% endcomment %}
+
+{% block title %}Users | AI Workforce{% endblock %}
+{% block body_class %}page-users{% endblock %}
+{% block page_title %}Users{% endblock %}
+{% block page_subtitle %}
+    Everyone with access to the platform, the role each one holds, and what they have produced.
+{% endblock %}
+
+{% block page_actions %}
+    {% if can_add_user %}
+    <a href="{% url 'user_create' %}" class="btn btn--primary">
+        <i class="fa-solid fa-user-plus" aria-hidden="true"></i> Add a person
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Total accounts" value=total_users icon="fa-users" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Active" value=active_users icon="fa-user-check" tone="success" %}
+    {% include 'partials/_kpi_tile.html' with label="Staff" value=staff_users icon="fa-shield-halved" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Showing" value=users|length icon="fa-list" tone="warning" meta="on this page" %}
+</div>
+
+<section class="card u-mb-4">
+    <div class="card__header">
+        <h2 class="card__title">
+            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i> What each role may do
+        </h2>
+    </div>
+    <div class="card__body card__body--flush">
+        <div class="table-wrap">
+            <table class="table table--stack">
+                <thead>
+                    <tr>
+                        <th scope="col">Role</th>
+                        <th scope="col">Read</th>
+                        <th scope="col">Chat &amp; submit</th>
+                        <th scope="col">Approve</th>
+                        <th scope="col">Employees &amp; MCP</th>
+                        <th scope="col">Providers &amp; people</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td data-label="Role"><span class="badge badge--neutral">Viewer</span></td>
+                        <td data-label="Read"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Chat &amp; submit">&mdash;</td>
+                        <td data-label="Approve">&mdash;</td>
+                        <td data-label="Employees &amp; MCP">&mdash;</td>
+                        <td data-label="Providers &amp; people">&mdash;</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Role"><span class="badge badge--info">Analyst</span></td>
+                        <td data-label="Read"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Chat &amp; submit"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Approve">&mdash;</td>
+                        <td data-label="Employees &amp; MCP">&mdash;</td>
+                        <td data-label="Providers &amp; people">&mdash;</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Role"><span class="badge badge--warning">Manager</span></td>
+                        <td data-label="Read"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Chat &amp; submit"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Approve"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Employees &amp; MCP"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Providers &amp; people">&mdash;</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Role"><span class="badge badge--success">Administrator</span></td>
+                        <td data-label="Read"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Chat &amp; submit"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Approve"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Employees &amp; MCP"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                        <td data-label="Providers &amp; people"><i class="fa-solid fa-check" style="color:var(--color-success)"></i></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card__footer">
+        <span class="u-text-xs u-text-subtle">
+            Each role is a Django auth Group. The permissions behind it are defined in
+            <code>marketing/roles.py</code> and enforced with <code>has_perm</code>, so
+            hiding a button and refusing the request are the same rule.
+        </span>
+    </div>
+</section>
+
+{% if not can_manage %}
+<div class="alert alert--info u-mb-4">
+    <i class="fa-solid fa-eye" aria-hidden="true"></i>
+    <span>
+        You are viewing this page read-only. Managing accounts is an Administrator capability.
+    </span>
+</div>
+{% endif %}
+
+<!-- Server-side filters as a GET form, plus a client-side search in table.js -->
+<form class="toolbar" method="get" action="{% url 'users' %}">
+    <div class="toolbar__search">
+        <label class="sr-only" for="userSearch">Search users</label>
+        <input class="form-input" id="userSearch" type="search" name="q"
+               value="{{ search_query }}" placeholder="Search by name or email"
+               data-table-search="#usersTable">
+    </div>
+    <div class="toolbar__filters">
+        <label class="sr-only" for="roleFilter">Filter by role</label>
+        <select class="form-select" id="roleFilter" name="role">
+            {% for value, label in role_choices %}
+            <option value="{{ value }}" {% if role_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="statusFilter">Filter by status</label>
+        <select class="form-select" id="statusFilter" name="status">
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All statuses</option>
+            <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+            <option value="suspended" {% if status_filter == 'suspended' %}selected{% endif %}>Suspended</option>
+        </select>
+
+        <button class="btn btn--secondary" type="submit">
+            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
+        </button>
+        {% if search_query or role_filter != 'all' or status_filter != 'all' %}
+        <a class="btn btn--ghost" href="{% url 'users' %}">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<section class="card">
+    <div class="card__body card__body--flush">
+        <div class="table-wrap">
+            <table class="table table--stack" id="usersTable">
+                <thead>
+                    <tr>
+                        <th scope="col">Account</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Employees</th>
+                        <th scope="col">Prospects</th>
+                        <th scope="col">Approvals</th>
+                        <th scope="col">Joined</th>
+                        {% if can_manage %}<th scope="col">Actions</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in users %}
+                    <tr>
+                        <td data-label="Account">
+                            <span class="u-flex u-items-center u-gap-3">
+                                <span class="avatar avatar--sm avatar--round"
+                                      style="background: {{ row.profile.avatar_color|default:'#4f46e5' }};">
+                                    {{ row.profile.initials|default:'??' }}
+                                </span>
+                                <span>
+                                    <span class="u-semibold">{{ row.username }}</span>
+                                    {% if row.pk == user.pk %}
+                                    <span class="badge badge--primary">You</span>
+                                    {% endif %}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ row.email|default:"No email on file" }}
+                                    </span>
+                                </span>
+                            </span>
+                        </td>
+                        <td data-label="Role">
+                            {{ row.profile.get_role_display|default:"Not set" }}
+                            {% if row.is_superuser %}
+                            <span class="badge badge--info">Superuser</span>
+                            {% elif row.is_staff %}
+                            <span class="badge badge--neutral">Staff</span>
+                            {% endif %}
+                        </td>
+                        <td data-label="Status">
+                            <span class="badge badge--{% if row.is_active %}success{% else %}danger{% endif %}"
+                                  data-user-status="{{ row.pk }}">
+                                {% if row.is_active %}Active{% else %}Suspended{% endif %}
+                            </span>
+                        </td>
+                        <td data-label="Employees">{{ row.agent_count }}</td>
+                        <td data-label="Prospects">{{ row.lead_count }}</td>
+                        <td data-label="Approvals">{{ row.approval_count }}</td>
+                        <td data-label="Joined">{{ row.date_joined|date:"j M Y" }}</td>
+
+                        {% if can_manage %}
+                        <td data-label="Actions">
+                            <span class="u-flex u-gap-2 u-wrap u-justify-end u-items-center">
+                                {% if row.pk != user.pk %}
+                                <label class="switch" title="Activate or suspend this account">
+                                    <input class="switch__input" type="checkbox"
+                                           {% if row.is_active %}checked{% endif %}
+                                           data-toggle-user-active="{{ row.pk }}"
+                                           data-toggle-url="{% url 'api_toggle_user_active' %}">
+                                    <span class="switch__track"></span>
+                                    <span class="switch__label u-text-xs">Active</span>
+                                </label>
+                                {% endif %}
+
+                                <a href="{% url 'user_edit' row.pk %}"
+                                   class="btn btn--ghost btn--sm" title="Edit this account">
+                                    <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                                </a>
+
+                                {% if can_delete_user and row.pk != user.pk %}
+                                <form method="post" action="{% url 'user_delete' row.pk %}"
+                                      onsubmit="return confirm('Delete {{ row.username|escapejs }} permanently?');">
+                                    {% csrf_token %}
+                                    <button class="btn btn--ghost btn--sm" type="submit"
+                                            title="Delete this account">
+                                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+
+                                {% if row.pk == user.pk %}
+                                <span class="u-text-xs u-text-subtle">You</span>
+                                {% endif %}
+                            </span>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% empty %}
+                    <tr data-empty-row>
+                        <td colspan="{% if can_manage %}8{% else %}7{% endif %}">
+                            {% include 'partials/_empty_state.html' with icon="fa-user-slash" title="No users match" message="Try clearing the filters." %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                    <tr data-empty-row hidden>
+                        <td colspan="{% if can_manage %}8{% else %}7{% endif %}">
+                            {% include 'partials/_empty_state.html' with icon="fa-magnifying-glass" title="No matches" message="No account on this page matches your search." %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+{% include 'partials/_pagination.html' with page_obj=page_obj %}
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/table.js' %}" defer></script>
+{% endblock %}
