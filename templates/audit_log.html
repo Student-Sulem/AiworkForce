@@ -1,0 +1,301 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    Audit log -- the append-only history of the whole platform.
+    Rendered by marketing.views_platform.audit_log_view at the URL named
+    'audit_log'.
+
+    WHY THIS PAGE IS THE ANSWER TO "CAN YOU PROVE IT"
+    Every other page in the project makes a claim: an employee did some work,
+    an action waited for a person, an integration simulated rather than sent.
+    This is where those claims are checked. Entries are written by
+    marketing/audit.py and never edited, so the table is a record rather than
+    a report.
+
+    A SIMULATED ACTION MUST NOT LOOK LIKE A REAL ONE
+    The five outcomes are coloured and shaped differently, not just labelled:
+    Succeeded, Simulated, Failed, Denied and Pending. Somebody scanning the
+    column has to be able to see at a glance that a row was a simulation, and
+    a green tick beside "email sent" that actually means "email pretended" is
+    the single worst thing this page could do.
+
+    FILTERS ARE GET PARAMETERS
+    Every filter is a query parameter and the form is a plain GET form, so a
+    narrowed view is a URL somebody can send to a colleague, the browser back
+    button works, and the page needs no JavaScript at all. The view rebuilds
+    the same parameters into `querystring` so the pagination links carry them.
+
+    THE DETAIL PAYLOAD
+    Each entry's JSON detail is behind a <details> element rather than a
+    JavaScript toggle. Fifty collapsible cells that work with scripting
+    switched off are worth more than a bespoke widget.
+{% endcomment %}
+
+{% block title %}Audit log | AI Workforce{% endblock %}
+{% block body_class %}page-audit{% endblock %}
+{% block page_title %}Audit log{% endblock %}
+{% block page_subtitle %}
+    Everything the platform did, who or what did it, and whether it really happened
+    or was simulated.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'integrations' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-plug" aria-hidden="true"></i> Integrations
+    </a>
+    {% if actions_url %}
+    <a href="{{ actions_url }}" class="btn btn--secondary">
+        <i class="fa-solid fa-list-check" aria-hidden="true"></i> Action queue
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Events today" value=today_count icon="fa-calendar-day" tone="primary" meta="Since midnight, unfiltered" %}
+    {% include 'partials/_kpi_tile.html' with label="Actions executed" value=executed_count icon="fa-circle-check" tone="success" meta="Really happened, in this view" %}
+    {% include 'partials/_kpi_tile.html' with label="Actions simulated" value=simulated_count icon="fa-clone" tone="warning" meta="Demo mode, in this view" %}
+    {% include 'partials/_kpi_tile.html' with label="Denied or failed" value=refused_count icon="fa-circle-exclamation" tone="danger" meta="Refused or errored, in this view" %}
+</div>
+
+<div class="alert alert--info u-mb-4">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span>
+        Entries are written once and never changed. A row marked
+        <span class="audit-status audit-status--demo">Simulated</span> means the platform
+        produced a faithful simulation instead of reaching the real service, because that
+        integration has no credential or is deliberately held in demo mode. It is not a
+        failure, and it is not a real action either.
+    </span>
+</div>
+
+<!-- ------------------------------------------------------------------
+     Filters. A plain GET form, so this works with scripting switched off
+     and every narrowed view is a shareable URL.
+     ------------------------------------------------------------------ -->
+<form class="card u-mb-4 audit-filters" method="get" action="{% url 'audit_log' %}">
+    <div class="card__body">
+        <div class="form-row form-row--2">
+            <div class="form-field">
+                <label class="form-field__label" for="auditSearch">Search</label>
+                <input class="form-input" id="auditSearch" type="search" name="q"
+                       value="{{ search_query }}"
+                       placeholder="Action name, message or object">
+                <p class="form-field__hint">
+                    Matches the action name, the message and the object label.
+                </p>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="auditDays">Period</label>
+                <select class="form-select" id="auditDays" name="days">
+                    {% for value, label in day_choices %}
+                    <option value="{{ value }}"
+                            {% if days_filter == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row form-row--2">
+            <div class="form-field">
+                <label class="form-field__label" for="auditCategory">Category</label>
+                <select class="form-select" id="auditCategory" name="category">
+                    <option value="all" {% if category_filter == 'all' %}selected{% endif %}>
+                        All categories
+                    </option>
+                    {% for value, label in categories %}
+                    <option value="{{ value }}"
+                            {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="auditStatus">Outcome</label>
+                <select class="form-select" id="auditStatus" name="status">
+                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>
+                        All outcomes
+                    </option>
+                    {% for value, label in statuses %}
+                    <option value="{{ value }}"
+                            {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row form-row--2">
+            <div class="form-field">
+                <label class="form-field__label" for="auditAgent">AI employee</label>
+                <select class="form-select" id="auditAgent" name="agent">
+                    <option value="all" {% if agent_filter == 'all' %}selected{% endif %}>
+                        Anyone
+                    </option>
+                    <option value="none" {% if agent_filter == 'none' %}selected{% endif %}>
+                        No employee (a person or the platform)
+                    </option>
+                    {% for agent in agents %}
+                    <option value="{{ agent.pk }}"
+                            {% if agent_filter == agent.pk|stringformat:"s" %}selected{% endif %}>{{ agent.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label class="form-field__label" for="auditApp">Target application</label>
+                <select class="form-select" id="auditApp" name="app">
+                    <option value="all" {% if app_filter == 'all' %}selected{% endif %}>
+                        Any application
+                    </option>
+                    {% for name in apps %}
+                    <option value="{{ name }}"
+                            {% if app_filter == name %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            {% if has_filters %}
+            <a class="btn btn--ghost" href="{% url 'audit_log' %}">Clear filters</a>
+            {% endif %}
+            <button class="btn btn--primary" type="submit">
+                <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply filters
+            </button>
+        </div>
+    </div>
+</form>
+
+<p class="u-text-sm u-text-muted u-mb-4">
+    {{ matched_count }} entr{{ matched_count|pluralize:"y,ies" }} match
+    {% if window_days %}in the last {{ window_days }} day{{ window_days|pluralize }}{% else %}over all time{% endif %}.
+</p>
+
+{% if events %}
+<section class="card u-mb-4">
+    <div class="card__body card__body--flush">
+        <div class="table-wrap">
+            <table class="table audit-table">
+                <caption class="sr-only">
+                    Platform audit entries, newest first
+                </caption>
+                <thead>
+                    <tr>
+                        <th scope="col">When</th>
+                        <th scope="col">Who</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Action</th>
+                        <th scope="col">Application</th>
+                        <th scope="col">Object</th>
+                        <th scope="col">Outcome</th>
+                        <th scope="col">Message</th>
+                        <th scope="col">Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in events %}
+                    <tr class="audit-row audit-row--{{ event.status }}">
+                        <td data-label="When">
+                            <span class="u-text-sm">{{ event.created_at|date:"d M, H:i" }}</span>
+                            <br>
+                            <span class="u-text-xs u-text-subtle">{{ event.created_at|timesince }} ago</span>
+                        </td>
+
+                        <td data-label="Who">
+                            {% if event.agent_id %}
+                            <span class="u-semibold">{{ event.actor_label }}</span>
+                            <br><span class="u-text-xs u-text-subtle">AI employee</span>
+                            {% elif event.actor_id %}
+                            <span class="u-semibold">{{ event.actor_label }}</span>
+                            <br><span class="u-text-xs u-text-subtle">person</span>
+                            {% else %}
+                            <span class="u-text-subtle">system</span>
+                            {% endif %}
+                        </td>
+
+                        <td data-label="Category">
+                            <span class="chip">{{ event.get_category_display }}</span>
+                        </td>
+
+                        <td data-label="Action">
+                            <code class="u-text-xs">{{ event.action }}</code>
+                            {% if event.duration_ms %}
+                            <br><span class="u-text-xs u-text-subtle">{{ event.duration_ms }} ms</span>
+                            {% endif %}
+                        </td>
+
+                        <td data-label="Application">
+                            {% if event.integration_id %}
+                            <a href="{% url 'integration_detail' event.integration.provider_key %}">
+                                {{ event.integration.name }}
+                            </a>
+                            {% elif event.target_app %}
+                            {{ event.target_app }}
+                            {% else %}
+                            <span class="u-text-subtle">--</span>
+                            {% endif %}
+                        </td>
+
+                        <td data-label="Object" class="u-break">
+                            {% if event.proposed_action_id and action_detail_available %}
+                            <a href="{% url 'action_detail' event.proposed_action_id %}">
+                                {{ event.object_label|default:"View action"|truncatechars:60 }}
+                            </a>
+                            {% elif event.object_label %}
+                            {{ event.object_label|truncatechars:60 }}
+                            {% else %}
+                            <span class="u-text-subtle">--</span>
+                            {% endif %}
+                            {% if event.object_ref %}
+                            <br><span class="u-text-xs u-text-subtle u-mono">{{ event.object_ref }}</span>
+                            {% endif %}
+                        </td>
+
+                        <td data-label="Outcome">
+                            <span class="audit-status audit-status--{{ event.status }}">
+                                <i class="fa-solid
+                                    {% if event.status == 'ok' %}fa-circle-check
+                                    {% elif event.status == 'demo' %}fa-clone
+                                    {% elif event.status == 'failed' %}fa-circle-exclamation
+                                    {% elif event.status == 'denied' %}fa-ban
+                                    {% else %}fa-clock{% endif %}" aria-hidden="true"></i>
+                                {{ event.get_status_display }}
+                            </span>
+                        </td>
+
+                        <td data-label="Message" class="u-text-sm u-text-muted u-break">
+                            {{ event.message|default:"--" }}
+                        </td>
+
+                        <td data-label="Detail">
+                            {% if event.detail %}
+                            <details class="audit-detail">
+                                <summary>Payload</summary>
+                                <pre class="audit-detail__json">{{ event.detail|pprint }}</pre>
+                            </details>
+                            {% else %}
+                            <span class="u-text-subtle">--</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+{% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
+
+{% else %}
+    {% if has_filters %}
+        {% url 'audit_log' as clear_url %}
+        {% include 'partials/_empty_state.html' with icon="fa-magnifying-glass" title="No entries match" message="Widen the period or clear a filter. The history itself is unaffected by what this page shows." action_url=clear_url action_label="Clear filters" %}
+    {% else %}
+        {% include 'partials/_empty_state.html' with icon="fa-clock-rotate-left" title="Nothing recorded yet" message="An entry is written the first time an AI employee runs a tool, a person decides an action, or an integration is configured." %}
+    {% endif %}
+{% endif %}
+
+{% endblock %}

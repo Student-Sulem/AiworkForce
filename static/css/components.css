@@ -198,6 +198,14 @@
   color: var(--color-text-muted);
 }
 .chip--mono { font-family: var(--font-mono); }
+/* Marks the one MCP server that genuinely connects, as opposed to the six that
+   are modelled. Deliberately coloured, because the difference is the single
+   most important thing about that page. */
+.chip--live {
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
 .chip--danger { border-color: var(--color-danger-border); color: var(--color-danger); background: var(--color-danger-soft); }
 
 .chip-set { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

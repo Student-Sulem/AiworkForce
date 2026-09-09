@@ -1,0 +1,773 @@
+/* ==========================================================================
+   actions.css -- the approval queue, the review screen and the orchestrator
+   console.
+
+   Deliberately small. Everything these three pages could borrow they do
+   borrow: card, badge, btn, table, form-field, datalist, chip, tabs, toolbar,
+   preview, empty-state and the grid and stack layouts all come from
+   components.css and layout.css. What is here is only what none of those
+   already say:
+
+       .risk-pill          how dangerous this action is, at a glance
+       .target-app         which application it goes through
+       .queue-row          the row layout, and the settled and overdue states
+       .demo-warning       approving this will simulate, not send
+       .overdue-panel      what has been waiting too long
+       .payload-compare    what the employee wrote beside what it says now
+       .payload-json       a structured argument, shown but not editable
+       .save-edits         the button that explicitly does not approve
+       .action-timeline    the audit trail
+       .work-steps         the task's working record
+       .source-message     the chat turn this came out of
+       .confidence         the routing confidence label, around .meter
+       .routed-to          who the orchestrator chose
+       .workflow-steps     a suggested multi-employee sequence
+       .proposed-list      actions an employee just queued
+       .roster-card        the six employees on the console
+
+   Every colour is a custom property from tokens.css, so both themes work with
+   no second set of rules. Where a fill needs to be lighter or darker than a
+   token, colour-mix() against the surface token is used rather than a new
+   hard-coded value, which keeps the result correct in dark mode too.
+
+   Loaded seventh, after pages.css and before utilities.css.
+   ========================================================================== */
+
+
+/* ==========================================================================
+   Risk. The one fact that changes how carefully a row should be read.
+
+   Three levels, three tones, and a left bar heavy enough to be found by
+   scanning down the page rather than by reading each row. 'high' means the
+   action reaches somebody outside the company, so it is the only one drawn in
+   the danger colour.
+   ========================================================================== */
+
+.risk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-neutral-border);
+  border-left: 3px solid var(--color-neutral);
+  border-radius: var(--r-sm);
+  background: var(--color-neutral-soft);
+  color: var(--color-neutral);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.risk-pill--low {
+  background: var(--color-info-soft);
+  border-color: var(--color-info-border);
+  border-left-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.risk-pill--medium {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+  border-left-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.risk-pill--high {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+  border-left-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.risk-pill--lg {
+  padding: var(--sp-1) var(--sp-3);
+  border-left-width: 4px;
+  font-size: var(--fs-sm);
+}
+
+
+/* ==========================================================================
+   The target application, with its own icon colour. An anchor and a span both
+   use it, because the queue row has no integration page to link to when the
+   action is internal.
+   ========================================================================== */
+
+.target-app {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+a.target-app:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+
+/* ==========================================================================
+   The queue row.
+
+   The head is a single flex line holding the checkbox, the icon, the title
+   and the flags, so a reviewer's eye travels along one horizontal band per
+   action. Below 640px the flags drop under the title rather than squeezing
+   it, because the title is the part that has to stay readable.
+   ========================================================================== */
+
+.queue-row__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+.queue-row__check { margin-top: var(--sp-2); flex-shrink: 0; }
+
+.queue-row__flags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* The payload preview: what will happen, and to whom. Inset so it reads as a
+   quotation of the action's own content rather than as more page furniture. */
+.queue-row__preview {
+  padding: var(--sp-3);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--color-surface-2);
+}
+
+.queue-row__headline {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.queue-row__detail {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--color-text-muted);
+}
+
+/* Overdue: a left edge in the warning colour. Deliberately quieter than the
+   overdue panel above the list, which is where the count is announced. */
+.queue-row--overdue { border-left: 3px solid var(--color-warning); }
+
+/* Just decided, without a page reload. A brief tint so the reviewer can see
+   which row their click landed on before they scroll on. */
+/* The plain token first, so a browser without color-mix() still tints the
+   row rather than showing nothing. */
+.queue-row--settled {
+  background: var(--color-success-soft);
+  background: color-mix(in srgb, var(--color-success) 6%, var(--color-surface));
+}
+
+@media (max-width: 640px) {
+  .queue-row__flags { width: 100%; }
+}
+
+
+/* ==========================================================================
+   The mode warning. The most important sentence on either page.
+
+   An integration in demo mode simulates rather than sends, and a reviewer who
+   approves without knowing that has been misled by the interface. So it is
+   said before the button, in a block that cannot be mistaken for decoration.
+   ========================================================================== */
+
+.demo-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin: var(--sp-4) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-warning-border);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--r-md);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.demo-warning i { margin-top: 2px; flex-shrink: 0; }
+.demo-warning strong { color: var(--color-warning); }
+
+.demo-warning--danger {
+  border-color: var(--color-danger-border);
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.demo-warning--danger strong { color: var(--color-danger); }
+
+.demo-warning--lg {
+  margin-top: 0;
+  margin-bottom: var(--sp-6);
+  font-size: var(--fs-base);
+}
+
+
+/* ==========================================================================
+   The overdue panel. A queue nobody reads is the failure mode of an approval
+   workflow, so anything stale gets its own block at the top instead of
+   sinking quietly to the bottom of the list.
+   ========================================================================== */
+
+.overdue-panel { border-color: var(--color-danger-border); }
+.overdue-panel__note { margin: 0 0 var(--sp-4); }
+
+.overdue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overdue-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+}
+
+
+/* ==========================================================================
+   The header strip on the review screen: risk, status, employee, application.
+   ========================================================================== */
+
+.action-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+
+/* ==========================================================================
+   The payload comparison. What the employee wrote, beside what it says now.
+
+   This is the accountability the whole design turns on, so the two sides are
+   given equal width and equal weight rather than showing the change as a
+   diff: a reviewer reading a message to a customer needs to read both
+   versions as prose, not as a patch.
+
+   Side by side above 720px, stacked below it, because two 20-character
+   columns of an email body are useless.
+   ========================================================================== */
+
+.payload-compare + .payload-compare {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.payload-compare__key {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+
+.payload-compare__pair {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 720px) {
+  .payload-compare__pair { grid-template-columns: 1fr 1fr; }
+}
+
+.payload-compare__side {
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+  min-width: 0;
+}
+
+.payload-compare__side--before {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-soft);
+  background: color-mix(in srgb, var(--color-danger) 5%, var(--color-surface));
+}
+
+.payload-compare__side--after {
+  border-color: var(--color-success-border);
+  background: var(--color-success-soft);
+  background: color-mix(in srgb, var(--color-success) 5%, var(--color-surface));
+}
+
+.payload-compare__caption {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+.payload-compare__text {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+
+/* A structured argument. Shown so the reviewer sees the whole set, and left
+   read-only because a nested value cannot be edited safely in a text box. */
+.payload-json {
+  margin: 0;
+  padding: var(--sp-3);
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+
+/* ==========================================================================
+   Save edits. The note is not optional decoration: without it the button sits
+   beside Approve and reads as a step towards it. The sentence is what makes
+   editing and approving two separate acts in the reviewer's head as well as
+   in the database.
+   ========================================================================== */
+
+.save-edits {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.save-edits__note { flex: 1 1 260px; min-width: 0; line-height: var(--lh-normal); }
+
+/* The two decisions, stacked and full width, with the approve button larger.
+   They are not in a row with Save edits, so no click can slip from one to
+   the other. */
+.decide-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+
+/* ==========================================================================
+   The audit trail, as a timeline.
+
+   A table would answer "what are the entries"; the question a reviewer
+   actually asks is "what happened to this, in what order", so the entries are
+   drawn on a single line with one marker each. The marker is coloured by
+   event, which makes an edit between a proposal and an approval visible
+   without reading a word.
+   ========================================================================== */
+
+.action-timeline {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 var(--sp-5);
+  list-style: none;
+}
+
+/* The spine. Hidden from assistive technology: the ordered list already
+   carries the sequence. */
+.action-timeline::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 5px;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.action-timeline__item { position: relative; padding-bottom: var(--sp-4); }
+.action-timeline__item:last-child { padding-bottom: 0; }
+
+.action-timeline__marker {
+  position: absolute;
+  top: 4px;
+  left: calc(-1 * var(--sp-5) + 1px);
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-surface);
+  border-radius: var(--r-full);
+  background: var(--color-neutral);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+
+.action-timeline__item--proposed .action-timeline__marker { background: var(--color-primary); }
+.action-timeline__item--edited   .action-timeline__marker { background: var(--color-info); }
+.action-timeline__item--approved .action-timeline__marker { background: var(--color-success); }
+.action-timeline__item--executed .action-timeline__marker { background: var(--color-success); }
+.action-timeline__item--rejected .action-timeline__marker { background: var(--color-danger); }
+.action-timeline__item--failed   .action-timeline__marker { background: var(--color-danger); }
+.action-timeline__item--cancelled .action-timeline__marker { background: var(--color-text-subtle); }
+
+.action-timeline__body { min-width: 0; }
+
+.action-timeline__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.action-timeline__note {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+
+.action-timeline__changes {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+
+/* ==========================================================================
+   The task's working record: one line per tool call, coloured by outcome so a
+   failed step is findable without reading the whole list.
+   ========================================================================== */
+
+.work-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: work-step;
+}
+
+.work-steps__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+}
+
+.work-steps__item--ok      { border-left-color: var(--color-success); }
+.work-steps__item--pending { border-left-color: var(--color-warning); }
+.work-steps__item--failed  { border-left-color: var(--color-danger); }
+
+
+/* ==========================================================================
+   The chat turn this action came out of. A quotation, so it is obviously
+   somebody's words rather than the platform's.
+   ========================================================================== */
+
+.source-message__caption {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-subtle);
+}
+
+.source-message__body {
+  margin: 0;
+  padding: var(--sp-3);
+  border-left: 3px solid var(--color-primary-border);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+
+/* ==========================================================================
+   The orchestrator console.
+   ========================================================================== */
+
+/* Who was chosen. */
+.routed-to {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+}
+
+.routed-to__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--r-lg);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: var(--fs-md);
+}
+
+.routed-to__name { font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+
+/* Confidence, as a bar plus the number. The number is the accessible value;
+   the bar exists so a low-confidence route is obvious at a glance and gets
+   read more sceptically. */
+.confidence__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.confidence__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+
+.confidence__value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+}
+
+/* The bar itself is workforce.css's shared .meter, which was written for
+   exactly this. All that is added here is the height: on the console the
+   confidence is the headline figure of the panel, and a 6px rule reads as a
+   footnote rather than as the thing being reported. */
+.confidence__track { height: 10px; }
+
+.routing-reason {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-muted);
+}
+
+/* Actions the employee queued while answering. Each one is a link to its own
+   review page, because from here the only useful next step is to read it. */
+.proposed-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposed-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+}
+
+/* A suggested multi-employee sequence, numbered by CSS so the markup stays a
+   plain ordered list. */
+.workflow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: workflow-step;
+}
+
+.workflow-steps__item {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-10);
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+}
+
+.workflow-steps__item::before {
+  counter-increment: workflow-step;
+  content: counter(workflow-step);
+  position: absolute;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-full);
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-primary-border);
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+
+.workflow-steps__who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+}
+
+.workflow-steps__what { font-size: var(--fs-sm); color: var(--color-text); }
+.workflow-steps__why  { font-size: var(--fs-xs); color: var(--color-text-subtle); }
+
+/* The roster. */
+.roster-heading {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+}
+
+.roster-card .card__body { display: flex; flex-direction: column; }
+
+/* An example request. A button rather than a paragraph, because clicking it
+   fills the box: an empty text box is not usable by somebody who has never
+   seen the platform, and a sentence they can click is. */
+.example-request {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 100%;
+  margin-top: auto;
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.example-request:hover {
+  border-color: var(--color-primary-border);
+  border-style: solid;
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+.example-request--static { cursor: default; }
+.example-request--static:hover {
+  border-color: var(--color-border-strong);
+  border-style: dashed;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.example-request:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.example-request__caption {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+
+.example-request__text { line-height: var(--lh-normal); }
+
+/* The chip row under the input. Reuses .chip for its shape and adds only what
+   a button needs that a span does not. */
+.example-chip {
+  border-style: solid;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.example-chip:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+.example-chip:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.example-set__caption {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: var(--fw-semibold);
+}
+
+
+/* ==========================================================================
+   Reduced motion. The only transitions declared here are hover states, which
+   are decoration. The confidence bar's own transition belongs to .meter in
+   workforce.css and is that sheet's to soften.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .example-request,
+  .target-app { transition: none; }
+}

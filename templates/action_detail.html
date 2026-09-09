@@ -1,0 +1,721 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    ONE PROPOSED ACTION, IN FULL -- the review screen.
+    Rendered by marketing.views_actions.action_detail_view at the URL named
+    'action_detail'.
+
+    WHY THIS PAGE IS SHAPED THE WAY IT IS
+    -------------------------------------
+    Three separate acts are offered and they are never merged into one button:
+
+        Save edits           writes the payload and leaves it PENDING
+        Approve and execute  carries it out
+        Reject               refuses it, with a mandatory reason
+
+    A screen whose single obvious button both rewrote an employee's words and
+    sent them would not be a review screen. So "Save edits" says in words,
+    beside itself, that it does not approve; and an action whose risk is 'high'
+    asks for a confirmation before it goes, because a one-click send to a
+    customer is not a review.
+
+    STRUCTURE
+        left column     the editable payload, then the read-only argument set,
+                        then the before-and-after comparison
+        right column    the decision panel, the execution outcome, the
+                        provenance, and the full audit trail
+
+    The comparison exists because the difference between what an employee wrote
+    and what was actually sent must always be recoverable. That is the
+    accountability the whole design turns on, and it is why editing is recorded
+    as its own event rather than folded into the approval.
+{% endcomment %}
+
+{% block title %}{{ action.title|truncatechars:40 }} | Approval queue{% endblock %}
+{% block body_class %}page-actions{% endblock %}
+{% block page_title %}{{ action.title }}{% endblock %}
+{% block page_subtitle %}
+    <code>{{ action.action_type }}</code>
+    &middot; prepared {{ action.created_at|timesince }} ago
+    {% if action.agent %}&middot; by {{ action.agent.name }}{% endif %}
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'actions' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Back to the queue
+    </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- The header strip: everything that frames the decision, in one row -->
+<div class="action-head u-mb-6">
+    <span class="risk-pill risk-pill--{{ action.risk }} risk-pill--lg">
+        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+        {{ action.get_risk_display }}
+    </span>
+
+    {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display dot=True %}
+
+    {% if action.was_edited %}
+    <span class="badge badge--info">
+        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+        Edited {{ action.edit_count }}&times; by a reviewer
+    </span>
+    {% endif %}
+
+    {% if action.agent %}
+    <a class="target-app" href="{{ employee_url }}">
+        <i class="fa-solid {{ action.agent.avatar_icon }}"
+           style="color: {{ action.agent.avatar_color }};" aria-hidden="true"></i>
+        {{ action.agent.name }}
+    </a>
+    {% endif %}
+
+    {% if action.integration %}
+    <a class="target-app" href="{{ integration_url }}">
+        <i class="fa-solid {{ action.integration.icon }}"
+           style="color: {{ action.integration.color }};" aria-hidden="true"></i>
+        {{ action.integration.name }}
+    </a>
+    {% else %}
+    <span class="target-app">
+        <i class="fa-solid fa-user-gear" aria-hidden="true"></i> AI Workforce
+    </span>
+    {% endif %}
+</div>
+
+{% if action.mode_warning %}
+{# Said before the buttons rather than after them. A reviewer who approves
+   without knowing the integration would only simulate has been misled by
+   the interface. #}
+<div class="demo-warning demo-warning--{{ action.mode_warning.tone }} demo-warning--lg" role="note">
+    <i class="fa-solid {{ action.mode_warning.icon }}" aria-hidden="true"></i>
+    <span><strong>{{ action.mode_warning.label }}.</strong> {{ action.mode_warning.message }}</span>
+</div>
+{% endif %}
+
+{% if not pipeline_ready %}
+<div class="alert alert--warning" role="alert">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <span>
+        The approval pipeline is not available in this build, so this action can
+        be read but no decision or edit can be recorded yet.
+    </span>
+</div>
+{% endif %}
+
+{% if action.summary %}
+<div class="card u-mb-6">
+    <div class="card__body">
+        <p class="u-m-0">{{ action.summary }}</p>
+    </div>
+</div>
+{% endif %}
+
+<div class="grid grid-2">
+
+    <!-- ================= LEFT: what will actually be sent ================= -->
+    <div class="stack">
+
+        <!-- The editable payload, as a real form -->
+        <section class="card" aria-labelledby="payloadTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="payloadTitle">
+                    <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+                    What will be sent
+                </h2>
+                {% if editable_rows %}
+                <span class="badge badge--neutral">{{ editable_rows|length }} editable</span>
+                {% endif %}
+            </div>
+
+            <div class="card__body">
+                {% if editable_rows %}
+                <form id="payloadForm" data-action-id="{{ action.pk }}"
+                      data-url="{% url 'api_action_edit' %}">
+                    {% for field in editable_rows %}
+                    <div class="form-field">
+                        <label class="form-field__label" for="{{ field.dom_id }}">
+                            {{ field.label }}
+                            {% if field.is_secret %}
+                            <span class="badge badge--neutral">
+                                <i class="fa-solid fa-key" aria-hidden="true"></i> Secret
+                            </span>
+                            {% endif %}
+                        </label>
+
+                        {% if field.is_secret %}
+                        {# A credential the tool needed in order to prepare this
+                           action is still a credential. It is never rendered. #}
+                        <input class="form-input u-mono" id="{{ field.dom_id }}" type="text"
+                               value="{{ field.value }}" readonly disabled
+                               aria-describedby="{{ field.dom_id }}-hint">
+                        <p class="form-field__hint" id="{{ field.dom_id }}-hint">
+                            Hidden, and not editable from this page.
+                        </p>
+
+                        {% elif not field.editable %}
+                        <pre class="payload-json" id="{{ field.dom_id }}">{{ field.value }}</pre>
+
+                        {% elif field.field_type == 'longtext' %}
+                        <textarea class="form-textarea" id="{{ field.dom_id }}"
+                                  name="{{ field.key }}" rows="{{ field.rows }}"
+                                  data-payload-field="{{ field.key }}"
+                                  data-field-type="longtext">{{ field.value }}</textarea>
+
+                        {% elif field.field_type == 'boolean' %}
+                        <label class="form-check-row" for="{{ field.dom_id }}">
+                            <input class="form-check" type="checkbox" id="{{ field.dom_id }}"
+                                   name="{{ field.key }}"
+                                   data-payload-field="{{ field.key }}"
+                                   data-field-type="boolean"
+                                   {% if field.checked %}checked{% endif %}>
+                            Yes
+                        </label>
+
+                        {% elif field.field_type == 'number' %}
+                        <input class="form-input" id="{{ field.dom_id }}" type="number"
+                               name="{{ field.key }}" value="{{ field.value }}"
+                               step="any" data-payload-field="{{ field.key }}"
+                               data-field-type="number">
+
+                        {% elif field.field_type == 'choice' %}
+                        <select class="form-select" id="{{ field.dom_id }}" name="{{ field.key }}"
+                                data-payload-field="{{ field.key }}" data-field-type="choice">
+                            {% for value, label in field.choices %}
+                            <option value="{{ value }}"
+                                    {% if field.value == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+
+                        {% else %}
+                        <input class="form-input" id="{{ field.dom_id }}" type="text"
+                               name="{{ field.key }}" value="{{ field.value }}"
+                               data-payload-field="{{ field.key }}" data-field-type="text">
+                        {% endif %}
+
+                        {% if field.help_text %}
+                        <p class="form-field__hint">{{ field.help_text }}</p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+
+                    {% if action.is_pending and can_decide %}
+                    <div class="save-edits">
+                        <button class="btn btn--secondary" type="submit" id="saveEditsButton">
+                            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save edits
+                        </button>
+                        <p class="save-edits__note u-text-sm u-text-muted u-m-0">
+                            Saving does <strong>not</strong> approve this action. It stays
+                            pending, your change is recorded in the audit trail, and
+                            approving it remains a separate, deliberate step.
+                        </p>
+                    </div>
+                    {% elif action.is_pending %}
+                    <p class="u-text-sm u-text-muted">
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                        Editing an action before approval is a Manager capability.
+                    </p>
+                    {% else %}
+                    <p class="u-text-sm u-text-muted">
+                        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                        This action has been decided, so its payload is now fixed.
+                    </p>
+                    {% endif %}
+                </form>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-file-circle-question" title="This action declares no editable fields" message="The tool that prepared it did not offer any field for a reviewer to change. The full argument set is below." %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- The rest of the argument set, read-only on purpose -->
+        {% if readonly_rows %}
+        <section class="card" aria-labelledby="readonlyTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="readonlyTitle">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    The rest of the arguments
+                </h2>
+            </div>
+            <div class="card__body">
+                <p class="u-text-sm u-text-muted u-mb-4">
+                    Shown so you can see everything execution will use. These are
+                    not editable, because the tool did not offer them.
+                </p>
+                <div class="datalist">
+                    {% for field in readonly_rows %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">{{ field.label }}</span>
+                        <span class="datalist__value u-break">
+                            {% if field.is_secret %}
+                                <span class="u-mono u-text-subtle">{{ field.value }}</span>
+                                <span class="u-text-xs u-text-subtle">(secret)</span>
+                            {% elif field.field_type == 'json' %}
+                                <pre class="payload-json">{{ field.value }}</pre>
+                            {% else %}
+                                {{ field.value|default:"not set" }}
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- What the employee proposed, beside what it says now -->
+        {% if diff_rows %}
+        <section class="card" aria-labelledby="diffTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="diffTitle">
+                    <i class="fa-solid fa-code-compare" aria-hidden="true"></i>
+                    What the employee proposed
+                </h2>
+                <span class="badge badge--info">{{ diff_rows|length }} changed</span>
+            </div>
+            <div class="card__body">
+                <p class="u-text-sm u-text-muted u-mb-4">
+                    A reviewer has changed this action since the employee prepared
+                    it. Approving it now approves the version on the right, not the
+                    employee's own words.
+                </p>
+
+                {% for row in diff_rows %}
+                <div class="payload-compare">
+                    <p class="payload-compare__key u-m-0">{{ row.label }}</p>
+                    <div class="payload-compare__pair">
+                        <div class="payload-compare__side payload-compare__side--before">
+                            <p class="payload-compare__caption u-m-0">
+                                <i class="fa-solid fa-robot" aria-hidden="true"></i>
+                                The employee wrote
+                            </p>
+                            <pre class="payload-compare__text">{{ row.proposed|default:"(nothing)" }}</pre>
+                        </div>
+                        <div class="payload-compare__side payload-compare__side--after">
+                            <p class="payload-compare__caption u-m-0">
+                                <i class="fa-solid fa-user-pen" aria-hidden="true"></i>
+                                It now says
+                            </p>
+                            <pre class="payload-compare__text">{{ row.current|default:"(nothing)" }}</pre>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+    </div>
+
+    <!-- ================= RIGHT: the decision and the history ============= -->
+    <div class="stack">
+
+        <!-- The decision -->
+        <section class="card" aria-labelledby="decisionTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="decisionTitle">
+                    <i class="fa-solid fa-gavel" aria-hidden="true"></i> Decision
+                </h2>
+            </div>
+            <div class="card__body">
+                {% if action.is_pending and not can_decide %}
+                <div class="alert alert--info">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    <span>
+                        This is waiting for a decision, but your role cannot make
+                        one. Deciding a proposed action is a Manager or
+                        Administrator capability, because it is what lets something
+                        leave the company.
+                    </span>
+                </div>
+
+                {% elif action.is_pending %}
+                <p class="u-text-sm u-text-muted">
+                    Approving carries this out immediately
+                    {% if action.integration %} through {{ action.integration.name }}{% endif %}.
+                    Rejecting stops it and records your reason. Either way an entry
+                    is written to the audit trail below.
+                </p>
+
+                <div class="decide-actions">
+                    <button class="btn btn--success btn--lg btn--block" type="button"
+                            data-decide="approved" data-action-id="{{ action.pk }}"
+                            data-risk="{{ action.risk }}"
+                            data-title="{{ action.title }}"
+                            data-demo="{% if action.mode_warning.tone == 'warning' %}1{% else %}0{% endif %}"
+                            data-url="{% url 'api_action_decide' %}"
+                            data-reload="1">
+                        <i class="fa-solid fa-check" aria-hidden="true"></i>
+                        {% if action.mode_warning.tone == 'warning' %}
+                            Approve and simulate
+                        {% else %}
+                            Approve and execute
+                        {% endif %}
+                    </button>
+
+                    <button class="btn btn--outline-danger btn--block" type="button"
+                            data-decide="rejected" data-action-id="{{ action.pk }}"
+                            data-title="{{ action.title }}"
+                            data-url="{% url 'api_action_decide' %}"
+                            data-reload="1">
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
+                    </button>
+                </div>
+
+                {% if action.risk == 'high' %}
+                <p class="u-text-xs u-text-subtle u-mt-4 u-m-0">
+                    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                    High risk: this reaches somebody outside the company, so you
+                    will be asked to confirm once more.
+                </p>
+                {% endif %}
+
+                {% else %}
+                <div class="alert alert--{% if action.status == 'executed' %}success{% elif action.status == 'failed' or action.status == 'rejected' %}danger{% else %}info{% endif %}">
+                    <i class="fa-solid {% if action.status == 'executed' %}fa-circle-check{% elif action.status == 'failed' or action.status == 'rejected' %}fa-circle-xmark{% else %}fa-circle-info{% endif %}"
+                       aria-hidden="true"></i>
+                    <span>{{ action.decision_summary }}</span>
+                </div>
+                {% if action.decision_reason %}
+                <p class="u-text-sm u-mt-4 u-m-0">
+                    <strong>Reason given:</strong> {{ action.decision_reason }}
+                </p>
+                {% endif %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- What execution actually did -->
+        {% if outcome %}
+        <section class="card" aria-labelledby="outcomeTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="outcomeTitle">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Outcome
+                </h2>
+                {% if outcome.failed %}
+                <span class="badge badge--danger">
+                    <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> Failed
+                </span>
+                {% elif outcome.demo %}
+                <span class="badge badge--info">
+                    <i class="fa-solid fa-flask" aria-hidden="true"></i> Simulated
+                </span>
+                {% else %}
+                <span class="badge badge--success">
+                    <i class="fa-solid fa-bolt" aria-hidden="true"></i> Live
+                </span>
+                {% endif %}
+            </div>
+            <div class="card__body">
+                {% if outcome.demo and not outcome.failed %}
+                <div class="demo-warning demo-warning--warning" role="note">
+                    <i class="fa-solid fa-flask" aria-hidden="true"></i>
+                    <span>
+                        This ran in demo mode. It was recorded exactly as a live run
+                        would have been, and nothing left the company.
+                    </span>
+                </div>
+                {% endif %}
+
+                {% if outcome.summary %}
+                <p class="u-mt-2">{{ outcome.summary }}</p>
+                {% endif %}
+
+                <div class="datalist u-mt-4">
+                    {% if outcome.executed_at %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Executed</span>
+                        <span class="datalist__value">{{ outcome.executed_at|date:"j M Y, H:i" }}</span>
+                    </div>
+                    {% endif %}
+                    {% if outcome.external_id %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">External id</span>
+                        <span class="datalist__value u-mono u-break">{{ outcome.external_id }}</span>
+                    </div>
+                    {% endif %}
+                    {% if outcome.message %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Delivered to</span>
+                        <span class="datalist__value u-break">{{ outcome.message.recipient|default:"not recorded" }}</span>
+                    </div>
+                    {% endif %}
+                    {% if outcome.issue %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Issue</span>
+                        <span class="datalist__value u-break">
+                            {{ outcome.issue.reference|default:outcome.issue.title }}
+                        </span>
+                    </div>
+                    {% endif %}
+                    {% if outcome.event %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Meeting</span>
+                        <span class="datalist__value">{{ outcome.event.start_at|date:"j M Y, H:i" }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if outcome.external_url %}
+                <a class="btn btn--secondary btn--sm u-mt-4" href="{{ outcome.external_url }}"
+                   target="_blank" rel="noopener noreferrer">
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    Open it where it landed
+                </a>
+                {% endif %}
+
+                {% if outcome.failed and can_decide %}
+                <div class="u-mt-4">
+                    <button class="btn btn--secondary" type="button"
+                            data-retry="{{ action.pk }}"
+                            data-url="{% url 'api_action_retry' %}" data-reload="1">
+                        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                        Retry execution
+                    </button>
+                    <p class="u-text-xs u-text-subtle u-mt-2 u-m-0">
+                        The decision is not revisited. Only the execution is
+                        attempted again.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Where this came from -->
+        <section class="card" aria-labelledby="provenanceTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="provenanceTitle">
+                    <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
+                    Where this came from
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Proposed by</span>
+                        <span class="datalist__value">
+                            {% if action.agent %}
+                            <a href="{{ employee_url }}">{{ action.agent.name }}</a>
+                            {% else %}the system{% endif %}
+                        </span>
+                    </div>
+                    {% if action.requested_by %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Asked for by</span>
+                        <span class="datalist__value">{{ action.requested_by.get_username }}</span>
+                    </div>
+                    {% endif %}
+                    {% if action.conversation %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Conversation</span>
+                        <span class="datalist__value">
+                            <a href="{% url 'conversation' action.conversation.pk %}">
+                                {{ action.conversation.title|truncatechars:40 }}
+                            </a>
+                        </span>
+                    </div>
+                    {% endif %}
+                    {% if action.subject_display %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Concerns</span>
+                        <span class="datalist__value u-break">
+                            {{ action.subject_display }}
+                            {% if action.subject_label %}
+                            <span class="u-text-xs u-text-subtle">
+                                ({{ action.subject_label }}
+                                {% if action.subject_id %}#{{ action.subject_id }}{% endif %})
+                            </span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if action.source_message %}
+                <div class="source-message u-mt-4">
+                    <p class="source-message__caption u-m-0">
+                        <i class="fa-solid fa-comment" aria-hidden="true"></i>
+                        The message this came out of
+                    </p>
+                    <blockquote class="source-message__body">
+                        {{ action.source_message.content|truncatechars:500 }}
+                    </blockquote>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- The task's working record -->
+        {% if task %}
+        <section class="card" aria-labelledby="taskTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="taskTitle">
+                    <i class="fa-solid fa-list-check" aria-hidden="true"></i>
+                    The task it belongs to
+                </h2>
+                {% include 'partials/_status_badge.html' with status=task.status label=task.get_status_display %}
+            </div>
+            <div class="card__body">
+                <p class="u-semibold u-m-0">{{ task.title }}</p>
+                <p class="u-text-sm u-text-muted u-mt-2 u-m-0">
+                    {{ task.get_origin_display }}
+                    &middot; {{ task.tool_calls }} tool call{{ task.tool_calls|pluralize }}
+                    &middot; started {{ task.created_at|timesince }} ago
+                </p>
+
+                {% if task_steps %}
+                <ol class="work-steps u-mt-4">
+                    {% for step in task_steps %}
+                    <li class="work-steps__item work-steps__item--{{ step.outcome|default:'ok' }}">
+                        <span class="u-semibold">{{ step.label }}</span>
+                        {% if step.detail %}
+                        <span class="u-text-sm u-text-muted">{{ step.detail }}</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ol>
+                {% endif %}
+
+                {% if task.result_summary %}
+                <p class="u-text-sm u-mt-4 u-m-0">{{ task.result_summary }}</p>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- The audit trail -->
+        <section class="card" aria-labelledby="trailTitle">
+            <div class="card__header">
+                <h2 class="card__title" id="trailTitle">
+                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                    Audit trail
+                </h2>
+            </div>
+            <div class="card__body">
+                <ol class="action-timeline">
+                    {% for entry in trail %}
+                    <li class="action-timeline__item action-timeline__item--{{ entry.event }}">
+                        <span class="action-timeline__marker" aria-hidden="true"></span>
+                        <div class="action-timeline__body">
+                            <p class="action-timeline__head u-m-0">
+                                <span class="u-semibold">{{ entry.get_event_display }}</span>
+                                <span class="u-text-xs u-text-subtle">
+                                    by {{ entry.actor.get_username|default:"the system" }}
+                                    &middot;
+                                    <time datetime="{{ entry.created_at|date:'c' }}">
+                                        {{ entry.created_at|date:"j M Y, H:i" }}
+                                    </time>
+                                </span>
+                            </p>
+                            {% if entry.note %}
+                            <p class="action-timeline__note u-m-0">{{ entry.note }}</p>
+                            {% endif %}
+                            {% if entry.changes %}
+                            <p class="action-timeline__changes u-m-0">
+                                Changed:
+                                {% for key in entry.changes %}
+                                <code>{{ key }}</code>{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            </p>
+                            {% endif %}
+                            {% if entry.from_status and entry.to_status %}
+                            <p class="u-text-xs u-text-subtle u-m-0">
+                                {{ entry.from_status }} &rarr; {{ entry.to_status }}
+                            </p>
+                            {% endif %}
+                        </div>
+                    </li>
+                    {% empty %}
+                    <li class="action-timeline__item">
+                        <span class="action-timeline__marker" aria-hidden="true"></span>
+                        <div class="action-timeline__body">
+                            <p class="u-text-sm u-text-subtle u-m-0">No entries recorded.</p>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block modals %}
+{% comment %}
+    The same two dialogs as the queue page, so a rejection asks for a reason
+    and a high-risk approval asks once more, wherever the decision is made.
+{% endcomment %}
+<div class="modal" id="actionRejectModal" role="dialog" aria-modal="true"
+     aria-labelledby="actionRejectTitle" aria-hidden="true">
+    <div class="modal__box modal__box--sm">
+        <div class="modal__header">
+            <h2 class="modal__title" id="actionRejectTitle">
+                <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Reject action
+            </h2>
+            <button class="modal__close" type="button" data-modal-close
+                    aria-label="Close this dialog">&times;</button>
+        </div>
+        <div class="modal__body">
+            <p class="u-text-sm u-text-muted">
+                Rejecting <strong id="actionRejectSubject">this action</strong>.
+                It will not be carried out, and your reason is recorded in the
+                audit trail permanently.
+            </p>
+            <div class="form-field">
+                <label class="form-field__label" for="actionRejectReason">
+                    Reason <span class="form-field__required" aria-hidden="true">*</span>
+                </label>
+                <textarea class="form-textarea" id="actionRejectReason" rows="4" required
+                          placeholder="Say what is wrong with it, so the employee can do better next time"></textarea>
+                <p class="form-field__hint">Required. The endpoint refuses a blank reason.</p>
+            </div>
+        </div>
+        <div class="modal__footer">
+            <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+            <button class="btn btn--danger" type="button" id="actionRejectConfirm">
+                Reject this action
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="actionConfirmModal" role="dialog" aria-modal="true"
+     aria-labelledby="actionConfirmTitle" aria-hidden="true">
+    <div class="modal__box modal__box--sm">
+        <div class="modal__header">
+            <h2 class="modal__title" id="actionConfirmTitle">
+                <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                Confirm a high-risk action
+            </h2>
+            <button class="modal__close" type="button" data-modal-close
+                    aria-label="Close this dialog">&times;</button>
+        </div>
+        <div class="modal__body">
+            <div class="alert alert--danger">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span id="actionConfirmMessage">
+                    This action reaches somebody outside the company.
+                </span>
+            </div>
+            <p class="u-text-sm u-text-muted u-m-0">
+                <strong id="actionConfirmSubject">This action</strong> will be
+                carried out as soon as you confirm.
+            </p>
+        </div>
+        <div class="modal__footer">
+            <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+            <button class="btn btn--success" type="button" id="actionConfirmProceed">
+                <i class="fa-solid fa-check" aria-hidden="true"></i> Approve and execute
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/actions.js' %}" defer></script>
+{% endblock %}

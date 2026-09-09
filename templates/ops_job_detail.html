@@ -1,0 +1,475 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one job opening.
+    Rendered by marketing.views_ops.job_detail_view at the URL named 'ops_job'.
+
+    STRUCTURE
+      1. the record        status, department, salary, dates, provenance
+      2. the advertisement the summary and the full description
+      3. responsibilities  as written
+      4. requirements      WITH their weight and whether they are must-have
+      5. the ranking       every candidate, ordered by score, with the
+                           recommendation from their latest evaluation
+      6. interviews        arranged against this opening
+      7. actions           what the employee has prepared about this role and
+                           what a person has since decided
+
+    WHY SECTION 4 SHOWS THE WEIGHTS
+    The ranking in section 5 is computed from these weights. A shortlist whose
+    weighting is invisible is a shortlist nobody can argue with, which sounds
+    convenient and is in fact the problem: the point of storing requirements as
+    scoreable rows rather than prose is that the arithmetic can be checked.
+{% endcomment %}
+
+{% block title %}{{ opening.title }} | Recruitment{% endblock %}
+{% block body_class %}page-ops page-ops-job{% endblock %}
+{% block page_title %}{{ opening.title }}{% endblock %}
+{% block page_subtitle %}
+    {{ opening.department|default:"No department recorded" }}
+    &middot; {{ opening.get_seniority_display }}
+    &middot; {{ opening.get_employment_type_display }}
+    {% if opening.is_remote %}&middot; Remote{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_recruitment' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Recruitment
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this role
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<div class="detail-split">
+
+    <!-- ============ Left: the opening itself ============ -->
+    <div class="stack">
+
+        <!-- 2. The advertisement -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-file-lines" aria-hidden="true"></i> The advertisement
+                    </h2>
+                </div>
+                {% include 'partials/_status_badge.html' with status=opening.status label=opening.get_status_display dot=True %}
+            </div>
+            <div class="card__body">
+                {% if opening.summary %}
+                <p class="u-text-sm u-semibold">{{ opening.summary }}</p>
+                {% endif %}
+
+                {% if opening.description %}
+                <div class="scroll-panel scroll-panel--tall" tabindex="0"
+                     role="region" aria-label="The full job description">{{ opening.description }}</div>
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">
+                    No advertisement text has been written yet. Ask People Operations for one and
+                    it will write the description alongside the scoreable requirements.
+                </p>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 3. Responsibilities -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-list-check" aria-hidden="true"></i> Responsibilities
+                </h2>
+            </div>
+            <div class="card__body">
+                {% if opening.responsibilities %}
+                <ul class="criteria">
+                    {% for line in opening.responsibilities %}
+                    <li>
+                        <i class="fa-solid fa-circle-dot" aria-hidden="true"></i>
+                        <span>{{ line }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">No responsibilities recorded.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 4. Requirements, with the weights the scoring used -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+                        Requirements and their weight
+                    </h2>
+                    <p class="card__subtitle">
+                        Every candidate score below was computed from exactly these rows.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if requirements %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Requirement</th>
+                                <th scope="col">Weight</th>
+                                <th scope="col">Must have</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for requirement in requirements %}
+                            <tr>
+                                <td data-label="Requirement">{{ requirement.text }}</td>
+                                <td data-label="Weight">
+                                    {% if requirement.weight %}
+                                    <span class="chip chip--mono">{{ requirement.weight }}</span>
+                                    {% else %}
+                                    <span class="u-text-xs u-text-subtle">unweighted, read as 3</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Must have">
+                                    {% if requirement.must_have %}
+                                    <span class="badge badge--danger">Non-negotiable</span>
+                                    {% else %}
+                                    <span class="u-text-xs u-text-subtle">Desirable</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-scale-unbalanced" title="No scoreable requirements" message="Nothing here can be scored yet. Ask People Operations to rewrite the requirements as checkable rows: a requirement stored as a paragraph can only be eyeballed, which is the usual reason a shortlist cannot be defended later." action_url=agents_url action_label="Talk to People Operations" %}
+                </div>
+                {% endif %}
+            </div>
+            {% if opening.nice_to_have %}
+            <div class="card__footer">
+                <span class="u-text-xs u-text-subtle">Nice to have:</span>
+                <span class="chip-set">
+                    {% for line in opening.nice_to_have %}
+                    <span class="chip">{{ line }}</span>
+                    {% endfor %}
+                </span>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- 5. The ranking -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-ranking-star" aria-hidden="true"></i>
+                        Candidates, ranked
+                    </h2>
+                    <p class="card__subtitle">
+                        {{ candidates|length }} candidate{{ candidates|pluralize }}.
+                        Open one to read the evidence behind its score.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if candidates %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Candidate</th>
+                                <th scope="col">Score</th>
+                                <th scope="col">Recommendation</th>
+                                <th scope="col">Stage</th>
+                                <th scope="col">Experience</th>
+                                {% if can_manage %}<th scope="col">Change stage</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for candidate in candidates %}
+                            {% with evaluation=candidate.latest_evaluation %}
+                            <tr>
+                                <td data-label="Candidate">
+                                    <span class="u-flex u-items-center u-gap-3">
+                                        <span class="avatar avatar--sm avatar--round"
+                                              style="background: var(--color-primary);">
+                                            {{ candidate.initials }}
+                                        </span>
+                                        <span>
+                                            <a class="u-semibold" href="{% url 'ops_candidate' candidate.pk %}">
+                                                {{ candidate.full_name }}
+                                            </a>
+                                            <span class="u-text-xs u-text-subtle" style="display:block;">
+                                                {{ candidate.current_title|default:"Current role not recorded" }}
+                                                {% if candidate.current_company %}
+                                                    at {{ candidate.current_company }}
+                                                {% endif %}
+                                            </span>
+                                        </span>
+                                    </span>
+                                </td>
+                                <td data-label="Score">
+                                    <span class="score score--{{ candidate.score_band }}">
+                                        {{ candidate.score|floatformat:1 }}<span class="score__unit">/100</span>
+                                    </span>
+                                </td>
+                                <td data-label="Recommendation">
+                                    {% if evaluation %}
+                                        {{ evaluation.get_recommendation_display }}
+                                        <span class="u-text-xs u-text-subtle" style="display:block;">
+                                            screened {{ evaluation.created_at|date:"j M Y" }}
+                                        </span>
+                                    {% else %}
+                                        <span class="u-text-xs u-text-subtle">Not screened yet</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Stage">
+                                    <span id="jobCandidateStatus{{ candidate.pk }}">
+                                        {% include 'partials/_status_badge.html' with status=candidate.status label=candidate.get_status_display %}
+                                    </span>
+                                </td>
+                                <td data-label="Experience">
+                                    {{ candidate.years_experience|floatformat:1 }} years
+                                </td>
+                                {% if can_manage %}
+                                <td data-label="Change stage">
+                                    <label class="sr-only" for="jobCandidateSelect{{ candidate.pk }}">
+                                        Change the stage of {{ candidate.full_name }}
+                                    </label>
+                                    <select class="form-select inline-select"
+                                            id="jobCandidateSelect{{ candidate.pk }}"
+                                            data-ops-url="{% url 'api_ops_update' %}"
+                                            data-ops-model="candidate"
+                                            data-ops-id="{{ candidate.pk }}"
+                                            data-ops-field="status"
+                                            data-ops-current="{{ candidate.status }}"
+                                            data-ops-display="#jobCandidateStatus{{ candidate.pk }}">
+                                        {% for value, label in candidate.STATUS_CHOICES %}
+                                        <option value="{{ value }}" {% if candidate.status == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endwith %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-user-group" title="Nobody has applied to this opening" message="Ask People Operations to screen a resume against this role. It scores each requirement above one at a time and quotes the evidence from the resume beside every score." action_url=agents_url action_label="Talk to People Operations" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 6. Interviews -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Interviews
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if interviews %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Candidate</th>
+                                <th scope="col">Round</th>
+                                <th scope="col">When</th>
+                                <th scope="col">Format</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for interview in interviews %}
+                            <tr>
+                                <td data-label="Candidate">
+                                    <a href="{% url 'ops_candidate' interview.candidate.pk %}">
+                                        {{ interview.candidate.full_name }}
+                                    </a>
+                                </td>
+                                <td data-label="Round">
+                                    {{ interview.round_name }}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        round {{ interview.round_number }}
+                                    </span>
+                                </td>
+                                <td data-label="When">{{ interview.when_readable }}</td>
+                                <td data-label="Format">{{ interview.get_mode_display }}</td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=interview.status label=interview.get_status_display %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-calendar-xmark" title="No interviews yet" message="Ask People Operations to propose interview times and prepare questions for a shortlisted candidate." action_url=agents_url action_label="Talk to People Operations" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 7. Prepared actions -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                        Actions this opening has generated
+                    </h2>
+                    <p class="card__subtitle">
+                        Anything reaching a candidate waits here for a person before it is sent.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if actions %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Action</th>
+                                <th scope="col">Prepared by</th>
+                                <th scope="col">Reaches</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for action in actions %}
+                            <tr>
+                                <td data-label="Action">
+                                    <a href="{% url 'action_detail' action.pk %}">
+                                        <i class="fa-solid {{ action.icon }}" aria-hidden="true"></i>
+                                        {{ action.title|truncatechars:60 }}
+                                    </a>
+                                </td>
+                                <td data-label="Prepared by">{{ action.agent.name|default:"System" }}</td>
+                                <td data-label="Reaches">{{ action.target_app }}</td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing prepared for this opening" message="When People Operations drafts an interview invitation or a rejection for this role, it will appear here and in the approval queue rather than being sent." action_url=agents_url action_label="Talk to People Operations" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <!-- ============ Right: the metadata rail ============ -->
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i> The record
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Openings</span>
+                        <span class="datalist__value">{{ opening.openings }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Salary band</span>
+                        <span class="datalist__value">{{ opening.salary_range|default:"Not stated" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Location</span>
+                        <span class="datalist__value">
+                            {{ opening.location|default:"Not stated" }}{% if opening.is_remote %} (remote){% endif %}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Hiring manager</span>
+                        <span class="datalist__value">{{ opening.hiring_manager|default:"Not named" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Target start</span>
+                        <span class="datalist__value">
+                            {{ opening.target_start_date|date:"j M Y"|default:"Not set" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Created</span>
+                        <span class="datalist__value">{{ opening.created_at|date:"j M Y" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Written by</span>
+                        <span class="datalist__value">
+                            {{ opening.created_by_agent.name|default:opening.created_by.username|default:"Unknown" }}
+                        </span>
+                    </div>
+                </div>
+
+                {% if can_manage %}
+                <div class="form-field u-mt-6">
+                    <label class="form-field__label" for="jobStatusSelect">Status</label>
+                    <select class="form-select" id="jobStatusSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="job"
+                            data-ops-id="{{ opening.pk }}"
+                            data-ops-field="status"
+                            data-ops-current="{{ opening.status }}"
+                            data-ops-display="#jobStatusLabel">
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if opening.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Currently <span id="jobStatusLabel">{{ opening.get_status_display }}</span>.
+                        Closing a role does not withdraw anything already prepared for it.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        {% if opening.benefits %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-gift" aria-hidden="true"></i> Benefits offered
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="chip-set">
+                    {% for line in opening.benefits %}
+                    <span class="chip">{{ line }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

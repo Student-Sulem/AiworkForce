@@ -13,7 +13,7 @@ NoReverseMatch until all of them were rewritten.
 
 from django.urls import path
 
-from . import views
+from . import views, views_actions, views_ops, views_platform
 
 urlpatterns = [
     # ------------------------------------------------------------------
@@ -89,4 +89,79 @@ urlpatterns = [
     path('api/users/set-staff/', views.api_set_user_staff, name='api_set_user_staff'),
 
     path('api/preferences/theme/', views.api_set_theme, name='api_set_theme'),
+
+    # ==================================================================
+    # THE WORKFORCE PLATFORM
+    #
+    # Everything below belongs to the six-employee platform rather than to
+    # the original four-agent marketing tool. The views live in three
+    # modules by subject -- governance, operations and platform
+    # administration -- because a single views.py holding all of it would be
+    # four thousand lines and nobody would find anything in it.
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # Governance: the proposed-action queue, and the orchestrator that
+    # decides which employee handles a request.
+    # ------------------------------------------------------------------
+    path('actions/', views_actions.actions_view, name='actions'),
+    path('actions/<int:pk>/', views_actions.action_detail_view, name='action_detail'),
+    path('orchestrator/', views_actions.orchestrator_view, name='orchestrator'),
+
+    path('api/actions/decide/', views_actions.api_action_decide, name='api_action_decide'),
+    path('api/actions/edit/', views_actions.api_action_edit, name='api_action_edit'),
+    path('api/actions/bulk/', views_actions.api_action_bulk, name='api_action_bulk'),
+    path('api/actions/retry/', views_actions.api_action_retry, name='api_action_retry'),
+    path('api/orchestrator/route/', views_actions.api_orchestrate, name='api_orchestrate'),
+
+    # ------------------------------------------------------------------
+    # Platform administration: connected applications, global settings and
+    # the audit log.
+    # ------------------------------------------------------------------
+    path('integrations/', views_platform.integrations_view, name='integrations'),
+    path('integrations/<slug:provider_key>/', views_platform.integration_detail_view,
+         name='integration_detail'),
+    path('settings/', views_platform.settings_view, name='platform_settings'),
+    path('audit/', views_platform.audit_log_view, name='audit_log'),
+
+    path('api/integrations/configure/', views_platform.api_integration_configure,
+         name='api_integration_configure'),
+    path('api/integrations/test/', views_platform.api_integration_test,
+         name='api_integration_test'),
+    path('api/integrations/toggle/', views_platform.api_integration_toggle,
+         name='api_integration_toggle'),
+    path('api/integrations/mode/', views_platform.api_integration_mode,
+         name='api_integration_mode'),
+    path('api/settings/update/', views_platform.api_setting_update, name='api_setting_update'),
+
+    # ------------------------------------------------------------------
+    # Operations: the work the employees actually produce.
+    # ------------------------------------------------------------------
+    path('operations/recruitment/', views_ops.recruitment_view, name='ops_recruitment'),
+    path('operations/recruitment/job/<int:pk>/', views_ops.job_detail_view, name='ops_job'),
+    path('operations/recruitment/candidate/<int:pk>/', views_ops.candidate_detail_view,
+         name='ops_candidate'),
+    path('operations/people/', views_ops.people_view, name='ops_people'),
+
+    path('operations/engineering/', views_ops.engineering_view, name='ops_engineering'),
+    path('operations/engineering/project/<int:pk>/', views_ops.project_detail_view,
+         name='ops_project'),
+    path('operations/engineering/item/<int:pk>/', views_ops.work_item_detail_view,
+         name='ops_work_item'),
+
+    path('operations/support/', views_ops.support_view, name='ops_support'),
+    path('operations/support/ticket/<int:pk>/', views_ops.ticket_detail_view, name='ops_ticket'),
+
+    path('operations/content/', views_ops.content_view, name='ops_content'),
+
+    path('operations/knowledge/', views_ops.knowledge_view, name='ops_knowledge'),
+    path('operations/knowledge/<int:pk>/', views_ops.document_detail_view, name='ops_document'),
+
+    path('employees/<slug:agent_type>/', views_ops.employee_profile_view,
+         name='employee_profile'),
+
+    path('api/knowledge/search/', views_ops.api_knowledge_search, name='api_knowledge_search'),
+    path('api/knowledge/index/', views_ops.api_knowledge_index, name='api_knowledge_index'),
+    path('api/knowledge/sync/', views_ops.api_knowledge_sync, name='api_knowledge_sync'),
+    path('api/ops/update/', views_ops.api_ops_update, name='api_ops_update'),
 ]

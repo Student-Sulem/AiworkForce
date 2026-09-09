@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    Platform settings -- the company profile the AI employees read.
+    Rendered by marketing.views_platform.settings_view at the URL named
+    'platform_settings'.
+
+    WHY THESE ARE SETTINGS AND NOT CONSTANTS
+    An AI employee reads this table before it writes anything. The company
+    name goes into an email signature, the tone of voice shapes a caption, the
+    working hours bound a meeting it schedules, the approval policy decides
+    whether its work waits for a person. Putting those in a database row
+    edited from this page is what makes it possible to change how the whole
+    workforce behaves without touching code -- which is the same reason the
+    Integrations page exists, applied to behaviour instead of credentials.
+
+    ONE CONTROL PER SETTING, ONE SAVE PER SETTING
+    Each row saves on its own. That is deliberate rather than lazy: each of
+    these changes is separately audited and may separately need approval, so
+    one control mapping to one recorded change is what keeps the audit log
+    readable. A group-wide save would collapse six decisions into one entry.
+
+    The control itself is chosen from the setting's declared `value_type`, so
+    a setting added to marketing/tools/platform.py gains the right form
+    control here with no change to this template.
+
+    SECRETS
+    A setting marked `is_secret` shows "(set)" or "(not set)" and an empty
+    box. Its value is never sent to the browser, which is why leaving the box
+    blank changes nothing rather than clearing the value.
+{% endcomment %}
+
+{% block title %}Platform settings | AI Workforce{% endblock %}
+{% block body_class %}page-settings{% endblock %}
+{% block page_title %}Platform settings{% endblock %}
+{% block page_subtitle %}
+    The company profile, working rules and approval policy your AI employees read
+    before they write anything.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'integrations' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-plug" aria-hidden="true"></i> Integrations
+    </a>
+    <a href="{% url 'audit_log' %}?q=setting" class="btn btn--secondary">
+        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Change history
+    </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- ------------------------------------------------------------------
+     The explanatory panel. Without it this page looks like a preferences
+     screen; with it, it is clear why the company name is here and not in
+     a settings module.
+     ------------------------------------------------------------------ -->
+<section class="card u-mb-6 honesty-panel">
+    <div class="card__body">
+        <div class="u-flex u-items-start u-gap-3">
+            <span class="kpi__icon kpi__icon--primary">
+                <i class="fa-solid fa-building" aria-hidden="true"></i>
+            </span>
+            <div class="u-grow">
+                <h2 class="card__title u-m-0">This is the company profile your AI employees read</h2>
+                <p class="u-text-sm u-text-muted u-mt-2 u-m-0">
+                    Every employee consults these values before it drafts an email, writes a
+                    caption or schedules a meeting: the company name that signs a message, the
+                    tone of voice a post is written in, the hours a meeting may be booked
+                    inside, and whether a piece of work waits for a person. That is why the
+                    company name and the tone live here rather than in code -- changing how the
+                    whole workforce behaves should be a form somebody fills in, not an edit to a
+                    Python file followed by a restart.
+                </p>
+                <p class="u-text-sm u-text-muted u-mt-2 u-m-0">
+                    Each setting is saved on its own and recorded in the audit trail with who
+                    changed it and when. Where the platform's approval policy applies to a
+                    change, saving queues it for review and says so instead of claiming it was
+                    applied.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Settings" value=total_count icon="fa-sliders" tone="primary" meta="Each one is a database row" %}
+    {% include 'partials/_kpi_tile.html' with label="Groups" value=groups|length icon="fa-layer-group" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Held as secrets" value=secret_count icon="fa-key" tone="warning" meta="Never sent to the browser" %}
+</div>
+
+{% if not perms.marketing.change_systemsetting %}
+<div class="alert alert--info u-mb-6">
+    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+    <span>
+        Your role may read these settings but not change them. The update endpoint
+        refuses the request as well, so this is a rule and not merely a hidden button.
+    </span>
+</div>
+{% endif %}
+
+{% for group in groups %}
+<section class="card u-mb-6" aria-labelledby="settings-{{ group.key }}">
+    <div class="card__header">
+        <h2 class="card__title" id="settings-{{ group.key }}">
+            <i class="fa-solid
+                {% if group.key == 'company' %}fa-building
+                {% elif group.key == 'behaviour' %}fa-wand-magic-sparkles
+                {% elif group.key == 'approval' %}fa-clipboard-check
+                {% elif group.key == 'knowledge' %}fa-book-open
+                {% elif group.key == 'notification' %}fa-bell
+                {% else %}fa-sliders{% endif %}" aria-hidden="true"></i>
+            {{ group.label }}
+        </h2>
+        <span class="tabs__count">{{ group.settings|length }}</span>
+    </div>
+
+    <div class="card__body">
+        <div class="setting-list">
+            {% for entry in group.settings %}
+            <div class="setting" data-setting-row data-setting-key="{{ entry.row.key }}"
+                 data-setting-label="{{ entry.row.label }}"
+                 data-setting-type="{{ entry.row.value_type }}"
+                 data-update-url="{% url 'api_setting_update' %}"
+                 data-actions-url="{{ actions_url }}">
+
+                <div class="setting__body">
+                    <label class="form-field__label" for="setting-{{ entry.row.key }}">
+                        {{ entry.row.label }}
+                        {% if entry.row.is_secret %}
+                            {% if entry.is_set %}
+                            <span class="badge badge--success">set</span>
+                            {% else %}
+                            <span class="badge badge--warning">not set</span>
+                            {% endif %}
+                        {% endif %}
+                    </label>
+
+                    {% comment %}
+                        One control per value_type. A secret always renders as a
+                        password box with nothing in it, whatever its declared
+                        type, because its value is not available to render.
+                    {% endcomment %}
+                    {% if entry.row.is_secret %}
+                    <input class="form-input" type="password" id="setting-{{ entry.row.key }}"
+                           data-setting-input autocomplete="new-password" spellcheck="false"
+                           placeholder="{% if entry.is_set %}Leave blank to keep the stored value{% else %}Paste the value{% endif %}"
+                           {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>
+
+                    {% elif entry.row.value_type == 'boolean' %}
+                    <label class="switch">
+                        <input class="switch__input" type="checkbox" id="setting-{{ entry.row.key }}"
+                               data-setting-input
+                               {% if entry.bool_value %}checked{% endif %}
+                               {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>
+                        <span class="switch__track"></span>
+                        <span class="switch__label">
+                            {% if entry.bool_value %}Yes{% else %}No{% endif %}
+                        </span>
+                    </label>
+
+                    {% elif entry.row.value_type == 'longtext' %}
+                    <textarea class="form-textarea" id="setting-{{ entry.row.key }}"
+                              data-setting-input rows="4"
+                              {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>{{ entry.text_value }}</textarea>
+
+                    {% elif entry.row.value_type == 'json' %}
+                    <textarea class="form-textarea u-mono setting__json" id="setting-{{ entry.row.key }}"
+                              data-setting-input rows="6" spellcheck="false"
+                              {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>{{ entry.text_value }}</textarea>
+
+                    {% elif entry.row.value_type == 'number' %}
+                    <input class="form-input" type="number" id="setting-{{ entry.row.key }}"
+                           data-setting-input value="{{ entry.text_value }}"
+                           {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>
+
+                    {% elif entry.row.value_type == 'choice' %}
+                    <select class="form-select" id="setting-{{ entry.row.key }}" data-setting-input
+                            {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>
+                        {% for value, label in entry.choices %}
+                        <option value="{{ value }}"
+                                {% if entry.value|stringformat:"s" == value|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                        {% if not entry.choices %}
+                        <option value="">No choices are declared for this setting</option>
+                        {% endif %}
+                    </select>
+
+                    {% else %}
+                    <input class="form-input" type="text" id="setting-{{ entry.row.key }}"
+                           data-setting-input value="{{ entry.text_value }}"
+                           {% if not perms.marketing.change_systemsetting %}disabled{% endif %}>
+                    {% endif %}
+
+                    {% if entry.row.description %}
+                    <p class="form-field__hint">{{ entry.row.description }}</p>
+                    {% endif %}
+
+                    <p class="setting__meta u-text-xs u-text-subtle u-m-0">
+                        <code>{{ entry.row.key }}</code>
+                        &middot; {{ entry.row.get_value_type_display }}
+                        {% if entry.row.updated_by %}
+                        &middot; last changed by {{ entry.row.updated_by.username }}
+                        {{ entry.row.updated_at|timesince }} ago
+                        {% endif %}
+                    </p>
+
+                    <div class="alert alert--info u-mt-2" data-setting-result hidden role="status"></div>
+                </div>
+
+                {% if perms.marketing.change_systemsetting %}
+                <div class="setting__actions">
+                    <button class="btn btn--secondary btn--sm" type="button" data-setting-save
+                            aria-label="Save {{ entry.row.label }}">
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% empty %}
+    {% include 'partials/_empty_state.html' with icon="fa-sliders" title="No settings yet" message="The default rows are declared beside the tools that read them. Sign out and back in to have them created." %}
+{% endfor %}
+
+<div class="alert alert--warning">
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+    <span>
+        <strong>On storage:</strong> a value saved here is held in the local SQLite file as
+        an ordinary database row, which is exactly what makes it editable from a web page.
+        A setting marked as a secret is never read back out to the browser and its value is
+        not written into the audit trail either -- the fact that it changed is the auditable
+        event, not the value it changed to.
+    </span>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/integrations.js' %}" defer></script>
+{% endblock %}

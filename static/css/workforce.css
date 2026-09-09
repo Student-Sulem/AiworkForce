@@ -1,0 +1,686 @@
+/* ==========================================================================
+   workforce.css -- shared additions for the six-employee platform.
+
+   Only the pieces that more than one of the new areas needs. Anything that
+   belongs to one area lives in actions.css, platform.css or ops.css.
+
+   Every value comes from tokens.css. There is not one literal colour in this
+   file, which is what makes the dark theme work without a second copy of
+   these rules.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The sidebar grew from five links to twenty-one, so it needs to scroll
+   between the brand and the footer rather than pushing the sign-out button
+   off the bottom of a short viewport.
+   -------------------------------------------------------------------------- */
+
+/* The shell itself must stop scrolling for the inner region to take over.
+   Without this the brand and the sign-out button scroll away with the links,
+   which is the behaviour the wrapper exists to prevent. */
+.sidebar { overflow: hidden; }
+
+.sidebar__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding-bottom: var(--sp-2);
+}
+
+.sidebar__scroll::-webkit-scrollbar { width: 6px; }
+.sidebar__scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar__scroll::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: var(--r-full);
+}
+
+.sidebar__badge--muted {
+    background: var(--color-surface-3);
+    color: var(--color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Mode pills. The single most important piece of visual language in the
+   platform: whether an action will really happen or only be simulated.
+
+   Live is green, demo is amber, unavailable is red, disabled is grey. The
+   same three classes are used on the integration cards, on an action in the
+   approval queue, on an execution record and in the audit log, so a reader
+   learns the vocabulary once.
+   -------------------------------------------------------------------------- */
+
+.mode-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-2);
+    border-radius: var(--r-full);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    letter-spacing: 0.01em;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.mode-pill--live {
+    background: var(--color-success-soft);
+    color: var(--color-success);
+    border-color: var(--color-success-border);
+}
+
+.mode-pill--demo {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+    border-color: var(--color-warning-border);
+}
+
+.mode-pill--unavailable {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+    border-color: var(--color-danger-border);
+}
+
+.mode-pill--disabled {
+    background: var(--color-neutral-soft);
+    color: var(--color-neutral);
+    border-color: var(--color-neutral-border);
+}
+
+/* --------------------------------------------------------------------------
+   Explanatory panels. Several of the new pages need a paragraph that tells
+   the reader what they are looking at -- what demo mode means, what editing
+   an action does and does not do, where operational records come from. A
+   consistent treatment keeps those from reading as error messages.
+   -------------------------------------------------------------------------- */
+
+.notice-panel {
+    display: flex;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-primary);
+    border-radius: var(--r-md);
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+    margin-bottom: var(--sp-5);
+}
+
+.notice-panel__icon {
+    flex: 0 0 auto;
+    color: var(--color-primary);
+    font-size: var(--fs-md);
+    line-height: var(--lh-relaxed);
+}
+
+.notice-panel strong { color: var(--color-text); }
+
+.notice-panel--warning { border-left-color: var(--color-warning); }
+.notice-panel--warning .notice-panel__icon { color: var(--color-warning); }
+.notice-panel--danger { border-left-color: var(--color-danger); }
+.notice-panel--danger .notice-panel__icon { color: var(--color-danger); }
+.notice-panel--success { border-left-color: var(--color-success); }
+.notice-panel--success .notice-panel__icon { color: var(--color-success); }
+
+/* --------------------------------------------------------------------------
+   Chips. Skills on a candidate, tags on a document, labels on a work item,
+   hashtags on a post. All the same shape.
+   -------------------------------------------------------------------------- */
+
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-2);
+    border-radius: var(--r-sm);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+}
+
+.chip--accent {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary-border);
+    color: var(--color-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Meter bars. A candidate score, a sprint burn, an onboarding checklist, a
+   search relevance, a routing confidence. One implementation, driven by an
+   inline --value custom property so a template sets a width without a
+   style attribute full of arithmetic.
+   -------------------------------------------------------------------------- */
+
+.meter {
+    position: relative;
+    height: 6px;
+    border-radius: var(--r-full);
+    background: var(--color-surface-3);
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.meter__fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--value, 0%);
+    border-radius: var(--r-full);
+    background: var(--color-primary);
+    transition: width var(--transition);
+}
+
+.meter__fill--success { background: var(--color-success); }
+.meter__fill--warning { background: var(--color-warning); }
+.meter__fill--danger  { background: var(--color-danger); }
+
+.meter-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+}
+
+.meter-row__value {
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs);
+    color: var(--color-text-muted);
+    min-width: 2.75rem;
+    text-align: right;
+}
+
+/* --------------------------------------------------------------------------
+   Boards. The candidate pipeline and the work-item board are the same
+   structure: fixed-width columns that scroll sideways rather than squeezing
+   to nothing on a narrow screen.
+   -------------------------------------------------------------------------- */
+
+.board {
+    display: flex;
+    gap: var(--sp-4);
+    overflow-x: auto;
+    padding-bottom: var(--sp-3);
+    scrollbar-width: thin;
+}
+
+.board__column {
+    flex: 0 0 260px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+    min-height: 120px;
+}
+
+.board__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-bold);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-subtle);
+}
+
+.board__count {
+    font-variant-numeric: tabular-nums;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-full);
+    padding: 0 var(--sp-2);
+    color: var(--color-text-muted);
+}
+
+.board__card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-sm);
+    padding: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+    box-shadow: var(--shadow-xs);
+}
+
+.board__card:hover { border-color: var(--color-border-strong); }
+.board__card-title {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text);
+    line-height: var(--lh-tight);
+}
+
+.board__empty {
+    color: var(--color-text-subtle);
+    font-size: var(--fs-xs);
+    font-style: italic;
+    padding: var(--sp-2) 0;
+}
+
+/* --------------------------------------------------------------------------
+   Definition lists. Every detail page needs a label/value block, and a
+   table for two columns of prose is the wrong element.
+   -------------------------------------------------------------------------- */
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: var(--sp-4);
+    margin: 0;
+}
+
+.detail-grid > div { min-width: 0; }
+
+.detail-grid dt {
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-subtle);
+    margin-bottom: var(--sp-1);
+}
+
+.detail-grid dd {
+    margin: 0;
+    font-size: var(--fs-base);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Prose columns. Document content, a research report, a generated job
+   description. Long-form text needs a measure and a rhythm that a card does
+   not give it.
+   -------------------------------------------------------------------------- */
+
+.prose {
+    max-width: 68ch;
+    font-size: var(--fs-base);
+    line-height: var(--lh-relaxed);
+    color: var(--color-text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.prose--scroll {
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: var(--sp-3);
+}
+
+.prose h3, .prose h4 {
+    margin: var(--sp-5) 0 var(--sp-2);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+}
+
+.code-block {
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-sm);
+    padding: var(--sp-3);
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--color-text);
+}
+
+/* --------------------------------------------------------------------------
+   A small horizontal rail of avatars or icons, used to show which employees
+   or which applications something involves.
+   -------------------------------------------------------------------------- */
+
+.icon-rail {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+}
+
+.icon-rail__item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--r-sm);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    font-size: var(--fs-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Timelines. The action trail, a task's working record, a ticket's history.
+   -------------------------------------------------------------------------- */
+
+.timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 var(--sp-5);
+    border-left: 2px solid var(--color-border);
+}
+
+.timeline__item {
+    position: relative;
+    padding: 0 0 var(--sp-4) var(--sp-4);
+    font-size: var(--fs-sm);
+    color: var(--color-text-muted);
+}
+
+.timeline__item::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--sp-4) * -1 - 5px);
+    top: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--r-full);
+    background: var(--color-surface);
+    border: 2px solid var(--color-border-strong);
+}
+
+.timeline__item--ok::before     { border-color: var(--color-success); }
+.timeline__item--demo::before   { border-color: var(--color-warning); }
+.timeline__item--failed::before { border-color: var(--color-danger); }
+
+.timeline__title {
+    color: var(--color-text);
+    font-weight: var(--fw-semibold);
+}
+
+.timeline__meta {
+    font-size: var(--fs-xs);
+    color: var(--color-text-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   A dense section heading used inside cards on the operational pages, where
+   a page-level h2 would be too loud.
+   -------------------------------------------------------------------------- */
+
+.subhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin: var(--sp-6) 0 var(--sp-3);
+}
+
+.subhead__title {
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text);
+}
+
+.subhead__hint {
+    font-size: var(--fs-xs);
+    color: var(--color-text-subtle);
+}
+
+.subhead:first-child { margin-top: 0; }
+
+/* ==========================================================================
+   THE DASHBOARD
+
+   Four bands: readiness, the roster, the company, activity. Each has one
+   block below.
+   ========================================================================== */
+
+.stack--tight { gap: var(--sp-2); }
+
+/* --- Readiness checklist -------------------------------------------------- */
+
+.readiness {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.readiness__item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-3) 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.readiness__item:last-child { border-bottom: 0; padding-bottom: 0; }
+.readiness__item:first-child { padding-top: 0; }
+
+.readiness__mark {
+    flex: 0 0 auto;
+    font-size: var(--fs-md);
+    line-height: 1.4;
+    color: var(--color-text-subtle);
+}
+
+.readiness__item--ok   .readiness__mark { color: var(--color-success); }
+.readiness__item--warn .readiness__mark { color: var(--color-warning); }
+.readiness__item--todo .readiness__mark { color: var(--color-text-subtle); }
+
+.readiness__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.readiness__title {
+    font-size: var(--fs-base);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text);
+}
+
+.readiness__detail {
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+    color: var(--color-text-muted);
+}
+
+.readiness__item > .btn { flex: 0 0 auto; margin-top: 2px; }
+
+/* --- The roster ----------------------------------------------------------- */
+
+.roster {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+    gap: var(--sp-4);
+}
+
+.roster__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-md);
+    background: var(--color-surface);
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.roster__card:hover {
+    border-color: var(--color-border-strong);
+    box-shadow: var(--shadow-sm);
+}
+
+.roster__head { display: flex; align-items: center; gap: var(--sp-3); }
+
+.roster__name {
+    display: block;
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text);
+    text-decoration: none;
+    line-height: var(--lh-tight);
+}
+
+.roster__name:hover { color: var(--color-primary); }
+
+.roster__role {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--color-text-subtle);
+}
+
+.roster__desc {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+    color: var(--color-text-muted);
+}
+
+.roster__stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-2);
+    margin: 0;
+    padding: var(--sp-3) 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.roster__stats dt {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-subtle);
+    font-weight: var(--fw-semibold);
+}
+
+.roster__stats dd {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-bold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.roster__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+}
+
+/* --- The company: one row per operational area ---------------------------- */
+
+.area-list { list-style: none; margin: 0; padding: 0; }
+
+.area-list__item { border-bottom: 1px solid var(--color-border); }
+.area-list__item:last-child { border-bottom: 0; }
+
+.area-list__link {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-2);
+    color: var(--color-text);
+    text-decoration: none;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+}
+
+.area-list__link:hover { background: var(--color-surface-2); }
+.area-list__link > i { color: var(--color-text-subtle); width: 1.1rem; text-align: center; }
+.area-list__link:hover > i { color: var(--color-primary); }
+
+.area-list__figures {
+    font-size: var(--fs-xs);
+    color: var(--color-text-muted);
+    font-weight: var(--fw-regular);
+    text-align: right;
+}
+
+.area-list__figures strong {
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- A compact row for an action or an approval --------------------------- */
+
+.action-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-2);
+    border-radius: var(--r-sm);
+    text-decoration: none;
+    color: var(--color-text);
+}
+
+.action-row:hover { background: var(--color-surface-2); }
+
+.action-row__icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-sm);
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+    font-size: var(--fs-sm);
+}
+
+.action-row__title {
+    display: block;
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+}
+
+.action-row__meta {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--color-text-subtle);
+}
+
+/* --- The integration strip ------------------------------------------------ */
+
+.integration-strip {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--sp-2);
+}
+
+.integration-strip__item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-sm);
+    text-decoration: none;
+    color: var(--color-text);
+    font-size: var(--fs-sm);
+    background: var(--color-surface);
+}
+
+.integration-strip__item:hover { border-color: var(--color-border-strong); }
+
+.integration-strip__icon {
+    flex: 0 0 auto;
+    width: 22px;
+    text-align: center;
+    font-size: var(--fs-md);
+}
+
+.integration-strip__name { flex: 1 1 auto; min-width: 0; font-weight: var(--fw-medium); }

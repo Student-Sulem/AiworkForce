@@ -1,0 +1,934 @@
+/* ==========================================================================
+   ops.css -- the operational pages, and only what components.css does not
+   already provide.
+
+   Everything reusable already exists: card, table, badge, chip, btn, kpi,
+   datalist, empty-state, grid. This file adds the seven things those cannot
+   express:
+
+     1. boards          columns of cards that scroll sideways
+     2. score bands     a number coloured by what the number means
+     3. progress bars   a proportion shown as a proportion
+     4. loud markers    SLA breach, and a ticket that must reach a person
+     5. ticket thread   who said what, to whom, and whether it was ever sent
+     6. content calendar a real four-week grid by date
+     7. capability grid the generated employee profile
+
+   Plus two prose surfaces: a scroll panel for a resume, and a reading column
+   for a knowledge document with its chunk boundaries visible.
+
+   RULE, inherited from tokens.css: no colour is declared here. Every value is
+   a custom property, so dark theme comes for free and stays correct. The only
+   exceptions are the alpha overlays for the board rail and the calendar's
+   past-day wash, which are built with color-mix() from those same tokens.
+   ========================================================================== */
+
+
+/* ==========================================================================
+   1. BOARDS -- the candidate pipeline and the work-item board
+   ==========================================================================
+
+   A board is a horizontal scroller of fixed-width columns. It is NOT a grid:
+   with seven stages a grid either squeezes every column below readability or
+   forces the page itself to scroll sideways, and a page that scrolls sideways
+   moves the navigation off screen.
+
+   Accessibility: the scroller carries tabindex="0" and an accessible name in
+   the templates, so it can be reached and panned from the keyboard, and every
+   card is a real link, so Tab walks the board in stage order.
+   ========================================================================== */
+
+.board {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: var(--sp-3);
+  scroll-snap-type: x proximity;
+}
+
+.board:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+  border-radius: var(--r-md);
+}
+
+/* A column hidden by the board filter. The rule is needed because the bare
+   `hidden` attribute only sets display:none at the lowest specificity, and
+   the flex declaration below would otherwise win. */
+.board__column[hidden] { display: none; }
+
+.board__column {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 620px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-surface-2);
+  scroll-snap-align: start;
+}
+
+.board__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.board__title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.board__count {
+  min-width: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--color-surface-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.board__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  overflow-y: auto;
+}
+
+/* One card in a column. A link, not a div with a click handler, so it opens
+   in a new tab, shows its destination and works from the keyboard. */
+.board__card {
+  display: block;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.board__card:hover,
+.board__card:focus-visible {
+  border-color: var(--color-primary-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.board__card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.board__ref {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.board__card-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+
+.board__card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/* An overdue card is outlined rather than tinted: a tint fights the priority
+   pill sitting inside it, an outline does not. */
+.board__card--overdue {
+  border-color: var(--color-danger-border);
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.board__empty {
+  padding: var(--sp-4) var(--sp-3);
+  font-size: var(--fs-xs);
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+.board__overflow {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+/* The filter strip above a board. Buttons rather than a select, because the
+   useful operation is "hide the done column", one click at a time. */
+.board-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+
+/* ==========================================================================
+   2. SCORE BANDS
+
+   The thresholds are Candidate.score_band's, restated here as classes rather
+   than recomputed: strong at 80, possible at 60, weak below. The view sends
+   the band so this file and models_hr.py cannot drift.
+   ========================================================================== */
+
+.score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+}
+
+.score__unit { font-weight: var(--fw-regular); opacity: 0.7; }
+
+.score--strong {
+  background: var(--color-success-soft);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+}
+
+.score--possible {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.score--weak {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.score--unscored {
+  background: var(--color-neutral-soft);
+  border-color: var(--color-neutral-border);
+  color: var(--color-neutral);
+}
+
+/* The larger figure at the head of a candidate or evaluation panel. */
+.score-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-surface-2);
+}
+
+.score-big__value {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  font-family: var(--font-mono);
+}
+
+.score-big__label {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.score-big--strong { background: var(--color-success-soft); border-color: var(--color-success-border); }
+.score-big--strong .score-big__value { color: var(--color-success); }
+.score-big--possible { background: var(--color-warning-soft); border-color: var(--color-warning-border); }
+.score-big--possible .score-big__value { color: var(--color-warning); }
+.score-big--weak { background: var(--color-danger-soft); border-color: var(--color-danger-border); }
+.score-big--weak .score-big__value { color: var(--color-danger); }
+
+
+/* --- Priority pills -------------------------------------------------------
+   Distinct from .badge because priority is an ordered scale and reads better
+   as one, so the pills share a shape and differ only in weight of colour. */
+
+.prio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.prio--critical,
+.prio--urgent {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.prio--high {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.prio--medium,
+.prio--normal {
+  background: var(--color-info-soft);
+  border-color: var(--color-info-border);
+  color: var(--color-info);
+}
+
+.prio--low,
+.prio--lowest {
+  background: var(--color-neutral-soft);
+  border-color: var(--color-neutral-border);
+  color: var(--color-neutral);
+}
+
+
+/* ==========================================================================
+   3. PROGRESS BARS
+
+   role="progressbar" with aria-valuenow lives on the track in the templates,
+   so a screen reader hears the percentage rather than nothing at all.
+   ========================================================================== */
+
+.progress {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+
+.progress--lg { height: 12px; }
+
+.progress__bar {
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--color-primary);
+  transition: width var(--transition);
+}
+
+.progress__bar--success { background: var(--color-success); }
+.progress__bar--warning { background: var(--color-warning); }
+.progress__bar--danger  { background: var(--color-danger); }
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.progress-row .progress { flex: 1; min-width: 60px; }
+
+.progress__figure {
+  flex-shrink: 0;
+  min-width: 46px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-align: right;
+  color: var(--color-text-muted);
+}
+
+/* A committed-versus-completed bar, where the second figure sits inside the
+   first. Two stacked bars would imply two independent quantities. */
+.capacity {
+  position: relative;
+  height: 12px;
+  border-radius: var(--r-full);
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+
+.capacity__committed {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-primary-soft);
+  border-right: 1px solid var(--color-primary-border);
+}
+
+.capacity__completed {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-success);
+}
+
+
+/* ==========================================================================
+   4. LOUD MARKERS -- SLA, and the flag that means a person must look
+
+   SupportTicket.needs_human is the one column in this application whose whole
+   purpose is to be seen. It is set for a data breach, a legal threat, a safety
+   issue, a vulnerable customer. A quiet pill in a row of pills would be missed
+   exactly when being missed matters most, so it gets its own full-width band
+   on the list and a banner on the detail page.
+   ========================================================================== */
+
+.needs-human {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 2px solid var(--color-danger);
+  border-radius: var(--r-lg);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.needs-human__icon { font-size: var(--fs-lg); line-height: 1.2; }
+.needs-human__title { margin: 0; font-size: var(--fs-md); font-weight: var(--fw-bold); }
+.needs-human__body { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--color-text); }
+
+/* The band inside the ticket table. A whole row of its own, spanning every
+   column, so it cannot be mistaken for one cell's worth of decoration. */
+.table tr.row--flagged > td {
+  background: var(--color-danger-soft);
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.flag-row td {
+  padding-top: var(--sp-2) !important;
+  padding-bottom: var(--sp-2) !important;
+  border-bottom: 0 !important;
+  background: var(--color-danger-soft);
+}
+
+.flag-row__text {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-danger);
+}
+
+.sla {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+}
+
+.sla--ok {
+  background: var(--color-success-soft);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+}
+
+/* Deliberately the strongest treatment on the page apart from needs-human:
+   a breach is a promise to a customer that has already been broken. */
+.sla--breach {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text-onaccent);
+}
+
+.sla--none { border-style: dashed; }
+
+
+/* ==========================================================================
+   5. TICKET THREAD
+
+   Three directions, three treatments. Inbound sits left in a neutral bubble,
+   outbound sits right in the accent tint, an internal note is full width and
+   dashed because it is nobody's message. A draft carries a striped edge and a
+   caption, because the whole approval model depends on a reader never
+   confusing what was written with what the customer has read.
+   ========================================================================== */
+
+.thread { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.thread__msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 78%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-surface-2);
+}
+
+.thread__msg--inbound { align-self: flex-start; border-bottom-left-radius: var(--r-sm); }
+
+.thread__msg--outbound {
+  align-self: flex-end;
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-border);
+  border-bottom-right-radius: var(--r-sm);
+}
+
+.thread__msg--internal {
+  align-self: stretch;
+  max-width: 100%;
+  background: transparent;
+  border-style: dashed;
+}
+
+/* A draft is visibly unfinished business. */
+.thread__msg--draft {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-soft);
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+.thread__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.thread__who { font-weight: var(--fw-semibold); color: var(--color-text-muted); }
+
+.thread__body {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.thread__note {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-warning);
+}
+
+
+/* ==========================================================================
+   6. CONTENT CALENDAR
+
+   A real grid: seven columns of days, four rows of weeks. Below 900px it
+   collapses to one column per day stacked vertically, because a seven-column
+   grid on a phone is seven unreadable columns rather than a calendar.
+   ========================================================================== */
+
+.calendar { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.calendar__headings,
+.calendar__week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.calendar__heading {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.calendar__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-height: 104px;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface);
+}
+
+.calendar__day--past { background: var(--color-surface-2); }
+
+.calendar__day--today {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 2px 0 var(--color-primary);
+}
+
+.calendar__date {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+.calendar__entry {
+  display: block;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+  color: inherit;
+  text-decoration: none;
+}
+
+.calendar__entry:hover { border-color: var(--color-primary-border); }
+.calendar__entry-channel { display: block; font-weight: var(--fw-semibold); }
+.calendar__entry-title { display: block; color: var(--color-text-muted); }
+
+.calendar__entry--published { border-color: var(--color-success-border); background: var(--color-success-soft); }
+.calendar__entry--scheduled { border-color: var(--color-info-border); background: var(--color-info-soft); }
+.calendar__entry--skipped { opacity: 0.55; text-decoration: line-through; }
+
+@media (max-width: 899px) {
+  .calendar__headings { display: none; }
+  .calendar__week { grid-template-columns: minmax(0, 1fr); }
+  .calendar__day { min-height: 0; }
+  .calendar__day:empty { display: none; }
+}
+
+
+/* ==========================================================================
+   7. KNOWLEDGE SEARCH HITS
+
+   The score bar is relative to the best hit in the same result set, which the
+   endpoint computes. An absolute bar would be meaningless: BM25-style scores
+   have no ceiling, so a bar against an invented maximum would tell a reader
+   nothing except that the author had not thought about it.
+   ========================================================================== */
+
+.hits { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.hit {
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-surface);
+}
+
+.hit__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.hit__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.hit__title a { color: inherit; text-decoration: none; }
+.hit__title a:hover { text-decoration: underline; }
+
+.hit__snippet {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-3);
+  border-left: 3px solid var(--color-border-strong);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  color: var(--color-text-muted);
+}
+
+/* The matched terms, marked in place. Without this the reader has to find the
+   match themselves, which is the one piece of work the search should have
+   already done. */
+.hit__snippet mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-weight: var(--fw-semibold);
+}
+
+.hit__why {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.hit__score { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.hit__bar { flex: 1; max-width: 220px; height: 6px; border-radius: var(--r-full); background: var(--color-surface-3); overflow: hidden; }
+.hit__bar span { display: block; height: 100%; background: var(--color-primary); }
+.hit__figure { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--color-text-subtle); }
+
+
+/* ==========================================================================
+   8. CAPABILITY GRID -- the generated employee profile
+   ========================================================================== */
+
+.cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+}
+
+.cap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+}
+
+.cap__head { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.cap__name { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.cap__desc { margin: 0; font-size: var(--fs-xs); line-height: var(--lh-normal); color: var(--color-text-muted); }
+.cap__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.cap__tool {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+  word-break: break-all;
+}
+
+/* A capability that stops for a person is marked here as well as in the
+   Approval column, because the profile is read top to bottom rather than
+   scanned as a table. */
+.cap--approval { border-color: var(--color-warning-border); box-shadow: inset 3px 0 0 var(--color-warning); }
+
+.profile-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-5);
+}
+
+.profile-hero__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--r-xl);
+  font-size: var(--fs-2xl);
+  color: var(--color-text-onaccent);
+}
+
+
+/* ==========================================================================
+   9. PROSE SURFACES -- a resume panel, and a document with its chunks
+   ========================================================================== */
+
+/* A resume, a report body, a long JSON metric block: readable, scrollable,
+   and bounded so it cannot push the rest of the page off the screen. */
+.scroll-panel {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scroll-panel--tall { max-height: 560px; }
+
+.scroll-panel:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* The reading column for a knowledge document. Narrow on purpose: a policy
+   set at full page width is a policy nobody finishes. */
+.prose {
+  max-width: 68ch;
+  font-size: var(--fs-base);
+  line-height: var(--lh-relaxed);
+}
+
+.prose p { margin: 0 0 var(--sp-4); white-space: pre-wrap; word-break: break-word; }
+
+/* One indexed passage. The marker is what explains a search result: a reader
+   who sees the boundary understands why the ranking returned this stretch of
+   text and not the paragraph above it. */
+.chunk { position: relative; padding: var(--sp-2) 0 var(--sp-4) var(--sp-5); }
+
+.chunk::before {
+  content: '';
+  position: absolute;
+  inset: var(--sp-2) auto var(--sp-4) 0;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--color-border-strong);
+}
+
+.chunk__marker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.chunk__ordinal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-full);
+  background: var(--color-surface-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.chunk__heading { font-weight: var(--fw-semibold); color: var(--color-text-muted); text-transform: none; letter-spacing: 0; }
+
+
+/* ==========================================================================
+   10. WORK-ITEM TREE, and the small odds and ends
+
+   Indentation by a left border rather than a margin, so the relationship is
+   visible on a phone where the margin would be spent on the text.
+   ========================================================================== */
+
+.tree { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.tree__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-md);
+  background: var(--color-surface);
+}
+
+.tree__children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 var(--sp-2) var(--sp-4);
+  padding-left: var(--sp-4);
+  border-left: 2px dashed var(--color-border-strong);
+}
+
+.tree__row--child { background: var(--color-surface-2); }
+
+/* "blocked by ENG-12", stated rather than implied. An unstated dependency is
+   the most common reason a sprint quietly stalls. */
+.blocked-by {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px dashed var(--color-danger-border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-danger);
+  text-decoration: none;
+}
+
+.blocked-by:hover { background: var(--color-danger-soft); }
+
+/* An acceptance-criteria checklist. Read-only: the criteria are the record of
+   what "done" was agreed to mean, and a tick box here would imply this page
+   decides that. */
+.criteria { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+
+.criteria li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.criteria i { margin-top: 2px; color: var(--color-text-subtle); }
+
+/* The inline status/priority/assignee control. Narrower than .form-select so
+   it sits inside a table cell without stretching the column. */
+.inline-select {
+  min-width: 132px;
+  max-width: 190px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.inline-select:disabled { opacity: 0.6; cursor: progress; }
+
+/* A value the inline control has just replaced. Brief and quiet: it confirms
+   which cell changed without competing with the toast that says what to. */
+.is-updated {
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+  transition: box-shadow var(--transition);
+}
+
+/* A definition row used on the detail pages where .datalist is too tight,
+   because the value is a paragraph rather than a figure. */
+.factlist { display: grid; gap: var(--sp-4); }
+.factlist__key { margin: 0 0 var(--sp-1); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-subtle); }
+.factlist__value { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-relaxed); }
+
+/* Two columns on a detail page: the record on the left, the metadata rail on
+   the right. Collapses below 1024px, where a 320px rail leaves the record
+   itself too narrow to read. */
+.detail-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+
+@media (min-width: 1024px) {
+  .detail-split { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+}
+
+/* The channel-limit meter on a content card. */
+.limit-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); }
+.limit-row__figure { font-family: var(--font-mono); color: var(--color-text-muted); }
+.limit-row--over .limit-row__figure { color: var(--color-danger); font-weight: var(--fw-semibold); }
+
+.body-preview {
+  margin: 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -201,7 +201,23 @@ def logout_view(request):
 
 @login_required(login_url='login')
 def dashboard_view(request):
-    """Workspace overview: headline figures, campaigns and recent activity."""
+    """The company overview: the workforce, what is waiting, and what to do next.
+
+    Four bands, in the order somebody actually reads them:
+
+      1. What needs a person       the approval queue and anything urgent
+      2. The workforce             six employees and what each has been doing
+      3. The company              operational figures across the five areas
+      4. What is not set up yet    the readiness checklist
+
+    The fourth band is the one that matters most on a first run, and it is the
+    reason this page is not just a wall of counters. A new user opening the
+    platform has no language model, no connected applications and no idea
+    which of the eleven pages to look at. `_readiness` answers that: it names
+    what is missing, says what still works without it, and links to the page
+    that fixes it. Without that, the honest first impression of a system this
+    large is bewilderment.
+    """
     user = request.user
 
     if request.method == 'POST':
@@ -216,34 +232,241 @@ def dashboard_view(request):
     else:
         campaign_form = CampaignForm(user=user)
 
-    approvals = ApprovalRequest.objects.select_related('agent')
+    from django.db.models import Avg, Count
+
+    from . import audit as audit_log
+    from .models_content import ContentPiece
+    from .models_hr import Candidate, Interview, JobOpening
+    from .models_knowledge import DocumentChunk, KnowledgeDocument
+    from .models_platform import (AgentTask, AuditEvent, Integration,
+                                  ProposedAction)
+    from .models_support import SupportTicket
+
     today = timezone.now().date()
+    week_ahead = timezone.now() + timezone.timedelta(days=7)
+    fortnight_ago = timezone.now() - timezone.timedelta(days=14)
+
+    actions = ProposedAction.objects.select_related('agent', 'integration')
+    pending_actions = actions.filter(status='pending')
+    oldest_pending = pending_actions.order_by('created_at').first()
+
+    # The roster, annotated in one query each rather than a property call per
+    # employee per counter, which on six employees and four counters would be
+    # twenty-four queries for one page.
+    agents = list(
+        AIAgent.objects.select_related('llm_model', 'llm_model__provider')
+        .annotate(
+            capability_count=Count('capabilities', distinct=True),
+            open_task_count=Count(
+                'tasks',
+                filter=Q(tasks__status__in=('queued', 'running', 'waiting_approval')),
+                distinct=True),
+            pending_action_count=Count(
+                'proposed_actions',
+                filter=Q(proposed_actions__status='pending'), distinct=True),
+        )
+    )
+
+    integrations = list(Integration.objects.all())
+    tickets = SupportTicket.objects.exclude(status__in=('resolved', 'closed'))
 
     context = {
-        'agents': AIAgent.objects.select_related('llm_model'),
-        'campaigns': MarketingCampaign.objects.select_related('assigned_agent')[:6],
-        'campaign_form': campaign_form,
-        'recent_approvals': approvals[:6],
+        # --- The workforce ---------------------------------------------
+        'agents': agents,
+        'agents_with_live_model': sum(1 for a in agents if a.has_live_llm),
 
-        # Headline figures
-        'total_leads': Lead.objects.count(),
-        'hot_leads': Lead.objects.filter(score_tier='hot').count(),
-        'active_campaigns': MarketingCampaign.objects.filter(status='active').count(),
-        'published_posts': SocialPost.objects.filter(status='published').count(),
+        # --- Governance -------------------------------------------------
+        'action_pending_count': pending_actions.count(),
+        'action_high_risk_count': pending_actions.filter(risk='high').count(),
+        'action_edited_count': pending_actions.filter(edit_count__gt=0).count(),
+        'action_approved_today': actions.filter(
+            status__in=('approved', 'executed'), decided_at__date=today).count(),
+        'action_executed_count': actions.filter(status='executed').count(),
+        'action_simulated_count': actions.filter(
+            status='executed', executed_in_demo=True).count(),
+        'action_failed_count': actions.filter(status='failed').count(),
+        'oldest_pending_action': oldest_pending,
+        'recent_actions': list(actions[:6]),
 
-        # Governance figures
-        'pending_count': approvals.filter(status='pending').count(),
-        'approved_today': approvals.filter(status='approved', decided_at__date=today).count(),
-        'rejected_count': approvals.filter(status='rejected').count(),
+        # The older text-approval queue, still in use for chat replies.
+        'pending_count': ApprovalRequest.objects.filter(status='pending').count(),
+        'recent_approvals': list(
+            ApprovalRequest.objects.select_related('agent')[:5]),
 
-        # Infrastructure figures
+        # --- Operations -------------------------------------------------
+        'open_role_count': JobOpening.objects.filter(status='open').count(),
+        'candidate_active_count': Candidate.objects.exclude(
+            status__in=('hired', 'rejected', 'withdrawn')).count(),
+        'shortlisted_count': Candidate.objects.filter(status='shortlisted').count(),
+        'interviews_this_week': Interview.objects.filter(
+            scheduled_at__gte=timezone.now(), scheduled_at__lte=week_ahead,
+            status__in=('scheduled', 'rescheduled')).count(),
+
+        'open_work_item_count': _work_item_counts()['open'],
+        'overdue_work_item_count': _work_item_counts()['overdue'],
+        'blocked_work_item_count': _work_item_counts()['blocked'],
+
+        'open_ticket_count': tickets.count(),
+        'urgent_ticket_count': tickets.filter(
+            Q(priority='urgent') | Q(needs_human=True)).count(),
+        'needs_human_tickets': list(
+            tickets.filter(needs_human=True).select_related('customer')[:4]),
+
+        'content_pending_count': ContentPiece.objects.filter(
+            status__in=('draft', 'pending')).count(),
+        'content_published_count': ContentPiece.objects.filter(
+            status='published').count(),
+
+        'document_count': KnowledgeDocument.objects.filter(is_active=True).count(),
+        'chunk_count': DocumentChunk.objects.count(),
+
+        # --- Platform ---------------------------------------------------
+        'integrations': integrations,
+        'integration_live_count': sum(
+            1 for row in integrations if row.effective_mode == 'live'),
+        'integration_demo_count': sum(
+            1 for row in integrations if row.effective_mode == 'demo'),
+        'integration_total': len(integrations),
+        'configured_providers': sum(
+            1 for provider in LLMProvider.objects.all() if provider.is_configured),
         'online_servers': MCPServer.objects.filter(
             is_enabled=True, connection_status='connected').count(),
         'total_servers': MCPServer.objects.count(),
-        'configured_providers': sum(
-            1 for provider in LLMProvider.objects.all() if provider.is_configured),
+
+        # --- Activity ---------------------------------------------------
+        'recent_events': audit_log.recent(limit=12),
+        'events_today': AuditEvent.objects.filter(created_at__date=today).count(),
+        'tasks_completed_fortnight': AgentTask.objects.filter(
+            status='done', completed_at__gte=fortnight_ago).count(),
+
+        # --- Legacy marketing figures, still shown lower down -----------
+        'campaigns': list(MarketingCampaign.objects.select_related('assigned_agent')[:6]),
+        'campaign_form': campaign_form,
+        'active_campaigns': MarketingCampaign.objects.filter(status='active').count(),
+        'total_leads': Lead.objects.count(),
+        'hot_leads': Lead.objects.filter(score_tier='hot').count(),
+        'published_posts': SocialPost.objects.filter(status='published').count(),
     }
+
+    context['readiness'] = _readiness(context)
     return render(request, 'dashboard.html', context)
+
+
+def _work_item_counts():
+    """Open, overdue and blocked engineering work, in one pass."""
+    from .models_eng import WorkItem
+
+    open_items = WorkItem.objects.exclude(status__in=('done', 'cancelled'))
+    return {
+        'open': open_items.count(),
+        'overdue': open_items.filter(due_date__lt=timezone.localdate()).count(),
+        'blocked': open_items.filter(status='blocked').count(),
+    }
+
+
+def _readiness(context):
+    """What is not set up yet, what still works without it, and where to fix it.
+
+    Each entry is a dict the template renders directly, so the shape is the
+    contract: `level` ('ok'/'warn'/'todo'), `title`, `detail`, `url_name`,
+    `action`. The order is the order a person should deal with them.
+
+    Written as data rather than as template conditionals because the same
+    assessment is wanted by the `workforce_status` management command, and
+    because a checklist assembled from six nested {% if %} blocks in a
+    template is a checklist nobody can reorder.
+    """
+    rows = []
+
+    if not context['configured_providers']:
+        rows.append({
+            'level': 'todo',
+            'title': 'No language model is connected',
+            'detail': ('The employees still run their tools and produce real '
+                       'records without one, but they cannot write prose. Add an '
+                       'OpenRouter or NVIDIA key, or point at a local Ollama; '
+                       'free options exist for all three.'),
+            'url_name': 'configurations',
+            'action': 'Connect a model',
+        })
+    else:
+        rows.append({
+            'level': 'ok',
+            'title': f"{context['configured_providers']} language model provider"
+                     f"{'s' if context['configured_providers'] != 1 else ''} connected",
+            'detail': f"{context['agents_with_live_model']} of the six employees can "
+                      f"reach the model assigned to them.",
+            'url_name': 'configurations',
+            'action': 'Review',
+        })
+
+    if not context['integration_live_count']:
+        rows.append({
+            'level': 'warn',
+            'title': 'Every connected application is in demo mode',
+            'detail': ('Nothing is broken. Each of the eleven integrations '
+                       'simulates its actions and labels every one of them as '
+                       'simulated, so the whole workflow is demonstrable. Add a '
+                       'credential to any one of them to make it real.'),
+            'url_name': 'integrations',
+            'action': 'Configure an application',
+        })
+    else:
+        rows.append({
+            'level': 'ok',
+            'title': f"{context['integration_live_count']} of "
+                     f"{context['integration_total']} applications are live",
+            'detail': (f"{context['integration_demo_count']} are still simulating, "
+                       f"which is clearly marked wherever their actions appear."),
+            'url_name': 'integrations',
+            'action': 'Review',
+        })
+
+    if not context['document_count']:
+        rows.append({
+            'level': 'todo',
+            'title': 'The knowledge base is empty',
+            'detail': ('Five of the six employees are instructed not to invent '
+                       'company facts, so with nothing indexed they can only say '
+                       'they do not know. Add a document, or sync one of the '
+                       'document sources.'),
+            'url_name': 'ops_knowledge',
+            'action': 'Add knowledge',
+        })
+    else:
+        rows.append({
+            'level': 'ok',
+            'title': f"{context['document_count']} documents indexed",
+            'detail': f"Searchable as {context['chunk_count']} passages, so a "
+                      f"question returns the paragraph that answers it.",
+            'url_name': 'ops_knowledge',
+            'action': 'Search',
+        })
+
+    if context['action_pending_count']:
+        oldest = context['oldest_pending_action']
+        age = f"{oldest.age_hours} hours" if oldest else 'some time'
+        rows.append({
+            'level': 'warn' if context['action_high_risk_count'] else 'todo',
+            'title': f"{context['action_pending_count']} actions are waiting for a person",
+            'detail': (f"{context['action_high_risk_count']} of them would reach "
+                       f"somebody outside the company. The oldest has been waiting "
+                       f"{age}."),
+            'url_name': 'actions',
+            'action': 'Review the queue',
+        })
+
+    if context['urgent_ticket_count']:
+        rows.append({
+            'level': 'warn',
+            'title': f"{context['urgent_ticket_count']} support tickets need attention",
+            'detail': ('These are either marked urgent or flagged as needing a '
+                       'person rather than an AI reply.'),
+            'url_name': 'ops_support',
+            'action': 'Open Support',
+        })
+
+    return rows
 
 
 # ===========================================================================
@@ -928,7 +1151,8 @@ def api_send_message(request):
         Conversation.objects.select_related('agent'),
         pk=data.get('conversation_id'), user=request.user)
 
-    user_message, assistant_message = agent_engine.send_message(conversation, text)
+    user_message, assistant_message = agent_engine.send_message(
+        conversation, text, user=request.user)
 
     return JsonResponse({
         'status': 'success',

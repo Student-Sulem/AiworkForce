@@ -314,13 +314,26 @@ MCP_BLUEPRINT = [
     },
 ]
 
-# Which tools each employee gets by default.
+# Which MCP tools each employee gets by default.
+#
+# This is the older capability layer and it is not what gives an employee its
+# business abilities -- those come from the tool registry in marketing/tools.
+# The attachments below are what the MCP Servers page shows and what the
+# knowledge-graph and reasoning servers are used for.
 AGENT_TOOL_BLUEPRINT = {
-    'content': ['instagram.publish_post', 'linkedin.publish_post', 'memory.search_nodes'],
-    'lead_finder': ['linkedin.search_people', 'database.run_query', 'memory.create_entities'],
-    'outreach': ['gmail.send_email', 'gmail.create_draft', 'gmail.list_messages',
-                 'gmail.search_messages', 'gmail.read_message', 'memory.read_graph'],
-    'analyst': ['database.run_query', 'sequential_thinking.sequentialthinking', 'memory.read_graph'],
+    'hr': ['gmail.send_email', 'gmail.create_draft', 'gmail.list_messages',
+           'gmail.search_messages', 'gmail.read_message', 'memory.read_graph',
+           'memory.create_entities'],
+    'engineering_manager': ['database.run_query', 'memory.read_graph',
+                            'sequential_thinking.sequentialthinking'],
+    'developer': ['database.run_query', 'database.describe_table',
+                  'sequential_thinking.sequentialthinking'],
+    'research': ['memory.search_nodes', 'memory.read_graph', 'memory.create_entities',
+                 'database.run_query', 'database.list_tables'],
+    'marketing': ['instagram.publish_post', 'linkedin.publish_post',
+                  'instagram.get_insights', 'memory.search_nodes'],
+    'support': ['gmail.list_messages', 'gmail.search_messages', 'gmail.read_message',
+                'gmail.send_email', 'memory.search_nodes'],
 }
 
 
@@ -335,26 +348,15 @@ def ensure_profile(user):
 
 
 def ensure_agents(owner=None):
-    """Create the four default AI employees for the shared workspace.
+    """Create the six AI employees for the shared workspace.
 
-    Keyed on agent_type alone, which is also the database unique constraint,
-    so calling this repeatedly can never produce duplicates. `owner` is only
-    recorded as provenance on rows this call creates.
+    The roster itself moved to marketing/workforce.py and the provisioning to
+    marketing/provisioning.py when the platform grew from four marketing
+    assistants into six AI employees with tools. This function stays as the
+    name the rest of the module calls.
     """
-    for blueprint in AGENT_BLUEPRINT:
-        AIAgent.objects.get_or_create(
-            agent_type=blueprint['agent_type'],
-            defaults={
-                'user': owner,
-                'name': blueprint['name'],
-                'role': blueprint['role'],
-                'avatar_icon': blueprint['avatar_icon'],
-                'avatar_color': blueprint['avatar_color'],
-                'persona_description': blueprint['persona_description'],
-                'system_prompt': PLATFORM_PREAMBLE + blueprint['system_prompt'],
-                'status': 'active',
-            },
-        )
+    from . import provisioning
+    return provisioning.ensure_agents(owner)
 
 
 def refresh_system_prompts():
@@ -500,15 +502,23 @@ def refresh_agent_tools():
 def ensure_workspace(owner=None):
     """Provision the shared workspace. Safe to call on every login.
 
-    There is one organisation, so this creates one set of employees, providers
-    and MCP servers no matter how many people sign in. Contrast the previous
-    design, which gave every account its own private copy; migration 0006
-    merged those copies together.
+    There is one organisation, so this creates one set of employees,
+    providers, integrations and MCP servers no matter how many people sign in.
+    Contrast the original design, which gave every account its own private
+    copy; migration 0006 merged those copies together.
+
+    The work itself is in marketing/provisioning.py -- employees,
+    integrations, settings, the generated capability catalogue and the seeded
+    knowledge base. The MCP servers below are the older capability layer, kept
+    because the MCP Servers page is genuinely about the Model Context Protocol
+    rather than about connected applications, and the two are different things.
     """
-    ensure_agents(owner)
-    ensure_providers(owner)
+    from . import provisioning
+
+    report = provisioning.ensure_workspace(owner)
     ensure_mcp_servers(owner)
     ensure_agent_tools(owner)
+    return report
 
 
 def ensure_workspace_for_user(user):
@@ -517,8 +527,21 @@ def ensure_workspace_for_user(user):
     Kept as the name the authentication views call: a profile is personal, the
     rest of the workspace is shared.
     """
-    ensure_profile(user)
-    ensure_workspace(owner=user)
+    from . import provisioning
+
+    provisioning.ensure_profile(user)
+    if not AIAgent.objects.exists():
+        return ensure_workspace(owner=user)
+
+    # The ordinary case. Only the generated things are refreshed, because
+    # those are the ones that go stale when the code changes underneath a
+    # database that already exists.
+    owner = user if getattr(user, 'pk', None) else None
+    provisioning.ensure_integrations(owner)
+    provisioning.ensure_settings(owner)
+    provisioning.ensure_capabilities()
+    ensure_mcp_servers(owner)
+    return {}
 
 
 def sync_agent_tools(agent, tools, actor=None):
@@ -724,13 +747,44 @@ def _generate_reply(agent, conversation, latest_text, mailbox=None):
     return _fallback_reply(agent, latest_text), 'fallback', '', 0
 
 
-def send_message(conversation, text):
-    """Record the person's message, generate a reply, and record that too.
+def send_message(conversation, text, user=None):
+    """Record the person's message, run the employee's turn, record the reply.
 
-    Returns (user_message, assistant_message). It never raises: a provider
-    failure becomes a template reply rather than an error page, so the
-    conversation can always continue.
+    Returns (user_message, assistant_message), which is the shape the chat
+    view has always expected. It never raises: a provider failure becomes a
+    reply produced by running a tool directly, so the conversation can always
+    continue.
+
+    THE TURN ITSELF lives in marketing/agent_runtime.py, because an employee's
+    turn is no longer one call to a language model. It is a loop: the model
+    chooses a tool, the platform runs it, the result goes back, and the loop
+    continues until the model has an answer. Tools that reach outside the
+    company queue a proposed action rather than acting, so the loop can finish
+    without anything having left the building.
+
+    The legacy single-shot path below is kept as the fallback for the case
+    where the runtime cannot be imported at all.
     """
+    try:
+        from . import agent_runtime
+    except ImportError:
+        return _legacy_send_message(conversation, text)
+
+    outcome = agent_runtime.run_turn(
+        conversation, text, user=user or conversation.user)
+
+    # The runtime returns the assistant message; the user's own message is
+    # read back rather than passed through, so this keeps working whichever
+    # of the two the runtime chooses to hand back.
+    user_message = outcome.get('user_message') or conversation.messages.filter(
+        role='user').order_by('-created_at').first()
+    assistant_message = outcome.get('message') or conversation.messages.filter(
+        role='assistant').order_by('-created_at').first()
+    return user_message, assistant_message
+
+
+def _legacy_send_message(conversation, text):
+    """The original single-shot reply, kept as a last-resort fallback."""
     agent = conversation.agent
 
     user_message = ChatMessage.objects.create(

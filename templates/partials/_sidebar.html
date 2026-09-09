@@ -2,10 +2,23 @@
     The primary navigation.
 
     Takes no include variables: `user` comes from Django's auth context
-    processor, and `nav_pending_count` from marketing.context_processors.
+    processor, and the counters from marketing.context_processors.
 
     Active state is decided by request.resolver_match.url_name, which is the
-    `name=` given to each path() in marketing/urls.py.
+    `name=` given to each path() in marketing/urls.py. Where a section has a
+    detail page as well as a list page, both names are tested, so opening a
+    candidate keeps Recruitment highlighted.
+
+    FOUR SECTIONS, IN THE ORDER SOMEBODY ACTUALLY WORKS
+    ---------------------------------------------------
+      Workspace   where you look and where you ask
+      Governance  what is waiting on a person, and what already happened
+      Operations  the work the employees produced
+      Platform    the connections and settings behind all of it
+
+    Governance sits second rather than last on purpose. The rule the whole
+    system turns on is that nothing external happens without a person, and a
+    queue somebody has to scroll to find is a queue that does not get read.
 {% endcomment %}
 <aside class="sidebar" id="appSidebar" aria-label="Primary navigation">
     <a href="{% url 'dashboard' %}" class="sidebar__brand">
@@ -13,69 +26,166 @@
         <span>AI Workforce</span>
     </a>
 
-    <div class="sidebar__section">Workspace</div>
-    <nav>
-        <ul>
-            <li>
-                <a href="{% url 'dashboard' %}" title="Dashboard"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}">
-                    <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
-                    <span class="nav-label">Dashboard</span>
-                </a>
-            </li>
-            <li>
-                <a href="{% url 'agents' %}" title="AI Employees"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'agents' or request.resolver_match.url_name == 'conversation' %}is-active{% endif %}">
-                    <i class="fa-solid fa-robot" aria-hidden="true"></i>
-                    <span class="nav-label">AI Employees</span>
-                </a>
-            </li>
-            <li>
-                <a href="{% url 'approvals' %}" title="Approvals"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'approvals' or request.resolver_match.url_name == 'approval_detail' %}is-active{% endif %}">
-                    <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
-                    <span class="nav-label">Approvals</span>
-                    <span class="sidebar__badge" id="navPendingBadge"
-                          {% if not nav_pending_count %}hidden{% endif %}>{{ nav_pending_count }}</span>
-                </a>
-            </li>
-            <li>
-                <a href="{% url 'users' %}" title="Users"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'users' %}is-active{% endif %}">
-                    <i class="fa-solid fa-users" aria-hidden="true"></i>
-                    <span class="nav-label">Users</span>
-                </a>
-            </li>
-        </ul>
-    </nav>
+    <div class="sidebar__scroll">
+        <div class="sidebar__section">Workspace</div>
+        <nav aria-label="Workspace">
+            <ul>
+                <li>
+                    <a href="{% url 'dashboard' %}" title="Dashboard"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}">
+                        <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
+                        <span class="nav-label">Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'agents' %}" title="AI Employees"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'agents conversation employee_profile' %}is-active{% endif %}">
+                        <i class="fa-solid fa-users-gear" aria-hidden="true"></i>
+                        <span class="nav-label">AI Employees</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'orchestrator' %}" title="Orchestrator"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'orchestrator' %}is-active{% endif %}">
+                        <i class="fa-solid fa-shuffle" aria-hidden="true"></i>
+                        <span class="nav-label">Orchestrator</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
 
-    <div class="sidebar__section">Platform</div>
-    <nav>
-        <ul>
-            <li>
-                <a href="{% url 'configurations' %}" title="Configurations"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'configurations' %}is-active{% endif %}">
-                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-                    <span class="nav-label">Configurations</span>
-                </a>
-            </li>
-            <li>
-                <a href="{% url 'mcp_tools' %}" title="MCP Tools"
-                   class="sidebar__link {% if request.resolver_match.url_name == 'mcp_tools' or request.resolver_match.url_name == 'mcp_server_detail' %}is-active{% endif %}">
-                    <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i>
-                    <span class="nav-label">MCP Tools</span>
-                </a>
-            </li>
-            {% if user.is_staff %}
-            <li>
-                <a href="/admin/" class="sidebar__link" title="Django admin">
-                    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
-                    <span class="nav-label">Admin panel</span>
-                </a>
-            </li>
-            {% endif %}
-        </ul>
-    </nav>
+        <div class="sidebar__section">Governance</div>
+        <nav aria-label="Governance">
+            <ul>
+                <li>
+                    <a href="{% url 'actions' %}" title="Approval queue"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'actions action_detail' %}is-active{% endif %}">
+                        <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                        <span class="nav-label">Approvals</span>
+                        <span class="sidebar__badge" id="navActionBadge"
+                              {% if not nav_action_count %}hidden{% endif %}>{{ nav_action_count }}</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'approvals' %}" title="Drafted content awaiting review"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'approvals approval_detail' %}is-active{% endif %}">
+                        <i class="fa-solid fa-file-pen" aria-hidden="true"></i>
+                        <span class="nav-label">Drafts</span>
+                        <span class="sidebar__badge" id="navPendingBadge"
+                              {% if not nav_pending_count %}hidden{% endif %}>{{ nav_pending_count }}</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'audit_log' %}" title="Audit log"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'audit_log' %}is-active{% endif %}">
+                        <i class="fa-solid fa-list-check" aria-hidden="true"></i>
+                        <span class="nav-label">Audit log</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar__section">Operations</div>
+        <nav aria-label="Operations">
+            <ul>
+                <li>
+                    <a href="{% url 'ops_recruitment' %}" title="Recruitment"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'ops_recruitment ops_job ops_candidate' %}is-active{% endif %}">
+                        <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                        <span class="nav-label">Recruitment</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'ops_people' %}" title="People"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'ops_people' %}is-active{% endif %}">
+                        <i class="fa-solid fa-id-card" aria-hidden="true"></i>
+                        <span class="nav-label">People</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'ops_engineering' %}" title="Engineering"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'ops_engineering ops_project ops_work_item' %}is-active{% endif %}">
+                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
+                        <span class="nav-label">Engineering</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'ops_support' %}" title="Customer support"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'ops_support ops_ticket' %}is-active{% endif %}">
+                        <i class="fa-solid fa-headset" aria-hidden="true"></i>
+                        <span class="nav-label">Support</span>
+                        <span class="sidebar__badge" id="navTicketBadge"
+                              {% if not nav_urgent_ticket_count %}hidden{% endif %}>{{ nav_urgent_ticket_count }}</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'ops_content' %}" title="Marketing content"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'ops_content' %}is-active{% endif %}">
+                        <i class="fa-solid fa-bullhorn" aria-hidden="true"></i>
+                        <span class="nav-label">Content</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'ops_knowledge' %}" title="Knowledge base"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'ops_knowledge ops_document' %}is-active{% endif %}">
+                        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+                        <span class="nav-label">Knowledge</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar__section">Platform</div>
+        <nav aria-label="Platform">
+            <ul>
+                <li>
+                    <a href="{% url 'integrations' %}" title="Connected applications"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'integrations integration_detail' %}is-active{% endif %}">
+                        <i class="fa-solid fa-plug-circle-check" aria-hidden="true"></i>
+                        <span class="nav-label">Integrations</span>
+                        <span class="sidebar__badge sidebar__badge--muted" id="navIntegrationBadge"
+                              {% if not nav_integration_live_count %}hidden{% endif %}>{{ nav_integration_live_count }}</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'platform_settings' %}" title="Company settings"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'platform_settings' %}is-active{% endif %}">
+                        <i class="fa-solid fa-building" aria-hidden="true"></i>
+                        <span class="nav-label">Company settings</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'configurations' %}" title="Language models"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'configurations' %}is-active{% endif %}">
+                        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                        <span class="nav-label">Language models</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'mcp_tools' %}" title="MCP servers"
+                       class="sidebar__link {% if request.resolver_match.url_name in 'mcp_tools mcp_server_detail' %}is-active{% endif %}">
+                        <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i>
+                        <span class="nav-label">MCP servers</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{% url 'users' %}" title="Users"
+                       class="sidebar__link {% if request.resolver_match.url_name == 'users' %}is-active{% endif %}">
+                        <i class="fa-solid fa-users" aria-hidden="true"></i>
+                        <span class="nav-label">Users</span>
+                    </a>
+                </li>
+                {% if user.is_staff %}
+                <li>
+                    <a href="/admin/" class="sidebar__link" title="Django admin">
+                        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                        <span class="nav-label">Admin panel</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
 
     <div class="sidebar__footer">
         <div class="sidebar__user">

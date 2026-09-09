@@ -534,3 +534,21 @@ class AnalyticsMetricAdmin(admin.ModelAdmin):
     list_filter = ('category', 'is_positive')
     search_fields = ('title', 'value')
     autocomplete_fields = ('user',)
+
+
+# ===========================================================================
+# The workforce, domain and platform models are registered in a sibling
+# module. The platform grew from seventeen models to sixty, and a single
+# admin file holding all of them would be fifteen hundred lines that nobody
+# can navigate -- so the split follows the one already made in the model
+# layer, where models.py holds the original schema and models_platform,
+# models_hr, models_eng, models_support, models_knowledge and models_content
+# hold the rest.
+#
+# The import sits at the very bottom rather than the top because
+# admin_workforce reuses the inlines and the flagship conventions defined
+# above. By the time execution reaches here every inline class in this file
+# is already defined, so the sibling module can rely on them.
+# ===========================================================================
+
+from . import admin_workforce  # noqa: E402,F401

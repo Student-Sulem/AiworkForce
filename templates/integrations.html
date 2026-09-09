@@ -1,0 +1,488 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    Integrations -- every connected company application.
+    Rendered by marketing.views_platform.integrations_view at the URL named
+    'integrations'.
+
+    WHAT THIS PAGE IS FOR
+    This is where the project's promise stops being a claim and becomes
+    something a person can check. Every connection is a database row, so a
+    credential is pasted into a form on this page rather than written into a
+    settings module or an environment file, and adding a connector file to the
+    project makes a new card appear here without a migration or a seed edit.
+
+    THE MODE INDICATOR IS THE POINT
+    Each card carries `effective_mode`, which is not the same question as "is
+    there a credential":
+
+        live         a call right now reaches the real service
+        demo         a call right now is simulated, and labelled as simulated
+        unavailable  set to live only, but not configured, so a call fails
+        disabled     switched off, so a call fails rather than being simulated
+
+    An unconfigured integration is therefore not broken; it is simulated. The
+    panel above the grid says that in plain words, because a status badge on
+    its own reads as a fault, and the difference between "this is pretending"
+    and "this is broken" is the difference between a user trusting the page
+    and not.
+
+    SECRETS
+    No secret value is rendered anywhere on this page. A credential field in
+    the configuration dialog shows "(currently set)" or "(not set)" and an
+    empty box; the stored value is never sent to the browser, which is also
+    why leaving the box blank means "keep it" rather than "clear it".
+
+    The dialogs are built one per integration from the connector's own
+    `config_fields`, so a connector that declares a new setting gains a form
+    control here with nothing else changed.
+{% endcomment %}
+
+{% block title %}Integrations | AI Workforce{% endblock %}
+{% block body_class %}page-integrations{% endblock %}
+{% block page_title %}Integrations{% endblock %}
+{% block page_subtitle %}
+    Every application your AI employees can act through, and whether each one is
+    reaching the real service or simulating it.
+{% endblock %}
+
+{% block page_actions %}
+    {% if actions_url %}
+    <a href="{{ actions_url }}" class="btn btn--secondary">
+        <i class="fa-solid fa-list-check" aria-hidden="true"></i> Action queue
+    </a>
+    {% endif %}
+    <a href="{% url 'audit_log' %}?category=integration" class="btn btn--secondary">
+        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Integration history
+    </a>
+    {% if perms.marketing.change_systemsetting %}
+    <a href="{% url 'platform_settings' %}" class="btn btn--primary">
+        <i class="fa-solid fa-sliders" aria-hidden="true"></i> Platform settings
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Connected applications" value=total_count icon="fa-plug" tone="primary" meta="One card per registered connector" %}
+    {% include 'partials/_kpi_tile.html' with label="Running live" value=live_count icon="fa-bolt" tone="success" meta="Actions reach the real service" %}
+    {% include 'partials/_kpi_tile.html' with label="In demo mode" value=demo_count icon="fa-clone" tone="warning" meta="Actions are simulated and labelled" %}
+    {% include 'partials/_kpi_tile.html' with label="Calls made" value=total_calls icon="fa-arrow-right-arrow-left" tone="info" meta=live_calls|stringformat:"s"|add:" live, "|add:demo_calls|stringformat:"s"|add:" simulated" %}
+</div>
+
+<!-- ------------------------------------------------------------------
+     The honesty panel. Everything else on the page is a status light;
+     this is the paragraph that explains what the status lights mean.
+     ------------------------------------------------------------------ -->
+<section class="card u-mb-6 honesty-panel">
+    <div class="card__body">
+        <div class="u-flex u-items-start u-gap-3">
+            <span class="kpi__icon kpi__icon--info">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            </span>
+            <div class="u-grow">
+                <h2 class="card__title u-m-0">An unconfigured integration is simulated, not broken</h2>
+                <p class="u-text-sm u-text-muted u-mt-2 u-m-0">
+                    Most of these services need an OAuth application and a company account
+                    before they will accept a single call, so every connector implements each
+                    operation twice: once against the real service, and once as a faithful
+                    simulation. Where no credential has been entered, the platform runs the
+                    simulation and <strong>labels every simulated action as simulated</strong>
+                    -- in the tool result, in the execution record, in the audit trail and on
+                    the screen. Nothing is ever presented as having happened when it did not.
+                </p>
+                <p class="u-text-sm u-text-muted u-mt-2 u-m-0">
+                    Paste a credential into an integration's Configure dialog and it moves to
+                    live with no code change and no restart. If a simulated action must never
+                    be mistaken for a real one, set that integration to
+                    <strong>Live only</strong>: it will then fail with an explanation rather
+                    than simulate. Switching an integration off does the same -- it stops,
+                    rather than quietly becoming a pretend version of itself.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{% if unavailable_count or disabled_count %}
+<div class="alert alert--warning u-mb-6">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <span>
+        {% if unavailable_count %}
+            {{ unavailable_count }} integration{{ unavailable_count|pluralize }} is set to
+            live only without a complete configuration, so calls to
+            {{ unavailable_count|pluralize:"it,them" }} fail rather than simulate.
+        {% endif %}
+        {% if disabled_count %}
+            {{ disabled_count }} integration{{ disabled_count|pluralize }}
+            {{ disabled_count|pluralize:"is,are" }} switched off.
+        {% endif %}
+    </span>
+</div>
+{% endif %}
+
+{% if not perms.marketing.configure_integration %}
+<div class="alert alert--info u-mb-6">
+    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+    <span>
+        Your role can see every connection and its settings, with credentials masked,
+        but only an Administrator may change one. The configuration endpoint refuses the
+        request as well, so this is a rule rather than a hidden button.
+    </span>
+</div>
+{% endif %}
+
+<!-- The mode wording, handed to integrations.js so the same sentences are used
+     when a card is repainted after a connection test. -->
+{{ mode_meta|json_script:"integrationModeMeta" }}
+
+{% for group in groups %}
+<section class="integration-group" aria-labelledby="group-{{ group.key }}">
+    <h2 class="integration-group__heading" id="group-{{ group.key }}">
+        {{ group.label }}
+        <span class="tabs__count">{{ group.integrations|length }}</span>
+    </h2>
+
+    <div class="grid grid-cards">
+        {% for card in group.integrations %}
+        <article class="card integration-card" data-integration-card
+                 data-provider-key="{{ card.row.provider_key }}"
+                 data-integration-name="{{ card.row.name }}">
+            <div class="card__body">
+
+                <div class="u-flex u-items-start u-gap-3 u-mb-4">
+                    <span class="avatar avatar--lg" style="background: {{ card.row.color }};">
+                        <i class="fa-{% if card.is_brand_icon %}brands{% else %}solid{% endif %} {{ card.row.icon }}"
+                           aria-hidden="true"></i>
+                    </span>
+                    <div class="u-grow">
+                        <h3 class="card__title u-m-0">
+                            <a href="{% url 'integration_detail' card.row.provider_key %}">{{ card.row.name }}</a>
+                        </h3>
+                        <p class="card__subtitle u-m-0">{{ card.row.get_category_display }}</p>
+                    </div>
+                    <span class="badge badge--{{ card.status_tone }}" data-status-pill>
+                        <span class="badge__dot" aria-hidden="true"></span>
+                        {{ card.row.get_connection_status_display }}
+                    </span>
+                </div>
+
+                <p class="u-text-sm u-text-muted">{{ card.row.description }}</p>
+
+                <!-- The mode pill and its explanation, which is the one thing on
+                     this card a person must not have to guess at. -->
+                <div class="mode-pill mode-pill--{{ card.mode }}" data-mode-block>
+                    <span class="mode-pill__label" data-mode-label>
+                        <i class="fa-solid {{ card.mode_meta.icon }}" aria-hidden="true"></i>
+                        {{ card.mode_meta.label }}
+                    </span>
+                    <span class="mode-pill__text" data-mode-text>{{ card.mode_meta.explanation }}</span>
+                </div>
+
+                {% if not card.has_connector %}
+                <div class="alert alert--danger u-mt-4">
+                    <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+                    <span>
+                        No connector is installed for
+                        <code>{{ card.row.provider_key }}</code>, so this row cannot act.
+                        It is shown rather than hidden because a row can outlive the
+                        connector file that created it.
+                    </span>
+                </div>
+                {% endif %}
+
+                <div class="missing-list u-mt-4" data-missing-block
+                     {% if not card.missing %}hidden{% endif %}>
+                    <p class="missing-list__title u-m-0">
+                        <i class="fa-solid fa-key" aria-hidden="true"></i> Still needed
+                    </p>
+                    <ul class="missing-list__items" data-missing-items>
+                        {% for label in card.missing %}
+                        <li>{{ label }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div class="datalist u-mt-4">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Calls</span>
+                        <span class="datalist__value">
+                            <span data-live-calls>{{ card.row.live_call_count }}</span> live
+                            &middot;
+                            <span data-demo-calls>{{ card.row.demo_call_count }}</span> simulated
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Last used</span>
+                        <span class="datalist__value">
+                            {% if card.row.last_used_at %}
+                                {{ card.row.last_used_at|timesince }} ago
+                            {% else %}
+                                <span class="u-text-subtle">Never</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Behaviour</span>
+                        <span class="datalist__value" data-mode-display>{{ card.row.get_mode_display }}</span>
+                    </div>
+                </div>
+
+                <div class="alert alert--info u-mt-4" data-test-result
+                     {% if not card.row.last_status_message %}hidden{% endif %} role="status">
+                    {{ card.row.last_status_message }}
+                    {% if card.row.last_checked_at %}
+                    <span class="u-text-xs u-text-subtle">
+                        (checked {{ card.row.last_checked_at|timesince }} ago)
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card__footer">
+                <label class="switch">
+                    <input class="switch__input" type="checkbox"
+                           {% if card.row.is_enabled %}checked{% endif %}
+                           {% if not perms.marketing.configure_integration %}disabled{% endif %}
+                           data-toggle-integration="{{ card.row.provider_key }}"
+                           data-toggle-url="{% url 'api_integration_toggle' %}"
+                           data-actions-url="{{ actions_url }}">
+                    <span class="switch__track"></span>
+                    <span class="switch__label">Enabled</span>
+                </label>
+
+                <div class="u-grow"></div>
+
+                {% if perms.marketing.test_integration %}
+                <button class="btn btn--secondary btn--sm" type="button"
+                        data-test-integration="{{ card.row.provider_key }}"
+                        data-test-url="{% url 'api_integration_test' %}">
+                    <i class="fa-solid fa-plug" aria-hidden="true"></i> Test connection
+                </button>
+                {% endif %}
+
+                {% if perms.marketing.configure_integration and card.has_connector %}
+                <button class="btn btn--primary btn--sm" type="button"
+                        data-modal-open="configure-{{ card.row.provider_key }}">
+                    <i class="fa-solid fa-gear" aria-hidden="true"></i> Configure
+                </button>
+                {% endif %}
+
+                <a href="{% url 'integration_detail' card.row.provider_key %}"
+                   class="btn btn--ghost btn--sm">
+                    Details <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% empty %}
+    {% include 'partials/_empty_state.html' with icon="fa-plug" title="No integrations yet" message="Sign out and back in: a row is created automatically for every connector in the project." %}
+{% endfor %}
+
+{% endblock %}
+
+
+{% comment %}
+    ------------------------------------------------------------------
+    The configuration dialogs, one per integration, built from that
+    connector's declared config_fields.
+
+    They live in the modals block rather than inside each card because a
+    dialog nested in a card inherits the card's overflow and stacking
+    context, and would then be clipped by it.
+
+    Only rendered for somebody who may actually configure an integration.
+    The endpoint checks the same permission, so this is presentation and
+    not the control itself.
+    ------------------------------------------------------------------
+{% endcomment %}
+{% block modals %}
+{% if perms.marketing.configure_integration %}
+    {% for card in cards %}
+    {% if card.has_connector %}
+    <div class="modal" id="configure-{{ card.row.provider_key }}" role="dialog" aria-modal="true"
+         aria-labelledby="configure-title-{{ card.row.provider_key }}" aria-hidden="true">
+        <div class="modal__box modal__box--lg">
+            <form data-config-form
+                  data-provider-key="{{ card.row.provider_key }}"
+                  data-integration-name="{{ card.row.name }}"
+                  data-configure-url="{% url 'api_integration_configure' %}"
+                  data-actions-url="{{ actions_url }}">
+
+                <div class="modal__header">
+                    <h2 class="modal__title" id="configure-title-{{ card.row.provider_key }}">
+                        <i class="fa-{% if card.is_brand_icon %}brands{% else %}solid{% endif %} {{ card.row.icon }}"
+                           aria-hidden="true"></i>
+                        Configure {{ card.row.name }}
+                    </h2>
+                    <button class="modal__close" type="button" data-modal-close
+                            aria-label="Close without saving">&times;</button>
+                </div>
+
+                <div class="modal__body">
+                    <p class="u-text-sm u-text-muted">
+                        These settings are stored on the {{ card.row.name }} row in the
+                        database, not in a file. A credential is write-only: it is never
+                        sent back to the browser, so its box is empty every time this
+                        dialog opens and leaving it empty keeps the stored value.
+                    </p>
+
+                    {% if card.credential_help %}
+                    <div class="alert alert--info u-mb-4">
+                        <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                        <span>
+                            <strong>Where to get the credential.</strong>
+                            {% for entry in card.credential_help %}
+                            <br>{{ entry.label }}: {{ entry.help_text }}
+                            {% endfor %}
+                            {% if card.docs_url %}
+                            <br>
+                            <a href="{{ card.docs_url }}" target="_blank" rel="noopener noreferrer">
+                                Provider documentation
+                                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                            </a>
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% endif %}
+
+                    <!-- The behaviour selector. Each option says what it does,
+                         because "auto" and "live" mean nothing on their own. -->
+                    <div class="form-field">
+                        <label class="form-field__label" for="mode-{{ card.row.provider_key }}">
+                            Behaviour when called
+                        </label>
+                        <select class="form-select" id="mode-{{ card.row.provider_key }}"
+                                name="__mode" data-config-mode>
+                            {% for value, label in card.mode_choices %}
+                            <option value="{{ value }}"
+                                    {% if card.row.mode == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <p class="form-field__hint">
+                            Automatic is the honest default: live once the required settings are
+                            present, simulated and clearly labelled until then. Live only turns a
+                            missing credential into a refusal instead of a simulation. Demo only
+                            simulates even when the credential works.
+                        </p>
+                    </div>
+
+                    {% for field in card.fields %}
+                    <div class="form-field">
+                        <label class="form-field__label"
+                               for="cfg-{{ card.row.provider_key }}-{{ field.key }}">
+                            {{ field.label }}
+                            {% if field.required %}
+                            <span class="form-field__required" aria-hidden="true">*</span>
+                            {% endif %}
+                            {% if field.secret %}
+                                {% if field.is_set %}
+                                <span class="badge badge--success">currently set</span>
+                                {% else %}
+                                <span class="badge badge--warning">not set</span>
+                                {% endif %}
+                            {% endif %}
+                        </label>
+
+                        {% if field.field_type == 'longtext' %}
+                        <textarea class="form-textarea"
+                                  id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                                  data-config-field="{{ field.key }}" rows="4"
+                                  placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+
+                        {% elif field.field_type == 'password' %}
+                        <input class="form-input" type="password"
+                               id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                               data-config-field="{{ field.key }}"
+                               autocomplete="new-password" spellcheck="false"
+                               placeholder="{% if field.is_set %}Leave blank to keep the stored value{% else %}{{ field.placeholder|default:'Paste the credential' }}{% endif %}">
+
+                        {% elif field.field_type == 'boolean' %}
+                        <label class="form-check-row">
+                            <input class="form-check" type="checkbox"
+                                   id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                                   data-config-field="{{ field.key }}"
+                                   {% if field.value %}checked{% endif %}>
+                            Yes
+                        </label>
+
+                        {% elif field.field_type == 'choice' %}
+                        <select class="form-select"
+                                id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                                data-config-field="{{ field.key }}">
+                            {% for choice in field.choices %}
+                            <option value="{{ choice }}"
+                                    {% if field.value|stringformat:"s" == choice|stringformat:"s" %}selected{% endif %}>{{ choice }}</option>
+                            {% endfor %}
+                        </select>
+
+                        {% elif field.field_type == 'number' %}
+                        <input class="form-input" type="number"
+                               id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                               data-config-field="{{ field.key }}"
+                               value="{{ field.value }}"
+                               placeholder="{{ field.placeholder }}">
+
+                        {% elif field.field_type == 'url' %}
+                        <input class="form-input" type="url"
+                               id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                               data-config-field="{{ field.key }}"
+                               value="{{ field.value }}"
+                               placeholder="{{ field.placeholder|default:'https://' }}">
+
+                        {% else %}
+                        <input class="form-input" type="text"
+                               id="cfg-{{ card.row.provider_key }}-{{ field.key }}"
+                               data-config-field="{{ field.key }}"
+                               value="{{ field.value }}"
+                               placeholder="{{ field.placeholder }}">
+                        {% endif %}
+
+                        {% if field.help_text %}
+                        <p class="form-field__hint">{{ field.help_text }}</p>
+                        {% endif %}
+
+                        {% if field.secret and field.is_set %}
+                        <label class="form-check-row u-text-xs">
+                            <input class="form-check" type="checkbox"
+                                   data-clear-secret="{{ field.key }}">
+                            Remove the stored value instead of replacing it
+                        </label>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+
+                    {% if not card.fields %}
+                    <div class="alert alert--info">
+                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                        <span>
+                            {{ card.row.name }} declares no settings: it needs no credential
+                            and works as soon as it is enabled.
+                        </span>
+                    </div>
+                    {% endif %}
+
+                    <div class="alert alert--info" data-config-result hidden role="status"></div>
+                </div>
+
+                <div class="modal__footer">
+                    <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+                    <button class="btn btn--primary" type="submit" data-config-submit>
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save settings
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+{% endif %}
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/integrations.js' %}" defer></script>
+{% endblock %}

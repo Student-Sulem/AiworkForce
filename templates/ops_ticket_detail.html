@@ -1,0 +1,600 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one support ticket.
+    Rendered by marketing.views_ops.ticket_detail_view at the URL named
+    'ops_ticket'.
+
+    STRUCTURE
+      0. the human banner  first thing on the page when needs_human is set
+      1. the thread        every message in order, styled by direction, with an
+                           AI draft marked as a draft that nobody has sent
+      2. the triage record category, priority WITH the phrases that drove it,
+                           sentiment, SLA, duplicate-of
+      3. resolution        and the escalation with its external reference
+      4. actions           prepared replies waiting for a person
+      5. the customer      their tier, and their other tickets
+
+    WHY THE THREAD DISTINGUISHES A DRAFT FROM A SENT MESSAGE
+    That distinction is the entire approval model made visible on the record it
+    concerns. A draft is text somebody wrote; a sent message is text the
+    customer has read. Rendering them alike would lose the only thing worth
+    knowing about either, so a draft carries a striped edge, a warning tint and
+    a caption saying it has not been sent.
+{% endcomment %}
+
+{% block title %}{{ ticket.reference }} {{ ticket.subject|truncatechars:36 }} | Support{% endblock %}
+{% block body_class %}page-ops page-ops-ticket{% endblock %}
+{% block page_title %}{{ ticket.reference }} &middot; {{ ticket.subject }}{% endblock %}
+{% block page_subtitle %}
+    From {{ ticket.customer_label }}
+    &middot; {{ ticket.get_channel_display }}
+    &middot; open {{ ticket.age_label }}
+    &middot; {{ ticket.message_count }} message{{ ticket.message_count|pluralize }}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_support' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Queue
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this ticket
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<!-- 0. The banner that changes what anybody may do ----------------------- -->
+{% if ticket.needs_human %}
+<div class="needs-human u-mb-6" role="alert">
+    <span class="needs-human__icon"><i class="fa-solid fa-hand" aria-hidden="true"></i></span>
+    <div class="u-grow">
+        <p class="needs-human__title">A person must answer this ticket</p>
+        <p class="needs-human__body">
+            This ticket is flagged <code>needs_human</code>, which is set for a data breach, a
+            legal threat, a safety issue, a vulnerable customer, a media enquiry or anything
+            involving self-harm. While it is set, <code>draft_customer_reply</code> refuses to
+            write and <code>send_customer_reply</code> refuses even to propose, whatever
+            {{ employee_name }} is asked to do. Nothing the model says can clear the flag --
+            only a person changing the record can.
+            {% if ticket.escalation_reason %}
+            <br>Recorded reason: {{ ticket.escalation_reason }}
+            {% endif %}
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% if draft_count %}
+<div class="alert alert--warning u-mb-4">
+    <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
+    <span>
+        {{ draft_count }} message{{ draft_count|pluralize }} in this thread
+        {{ draft_count|pluralize:"is,are" }} an unsent draft. The customer has not seen
+        {{ draft_count|pluralize:"it,them" }}.
+    </span>
+</div>
+{% endif %}
+
+<div class="detail-split">
+    <div class="stack">
+
+        <!-- 1. The conversation --------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-comments" aria-hidden="true"></i> The conversation
+                    </h2>
+                    <p class="card__subtitle">
+                        Inbound on the left, our replies on the right, internal notes across
+                        the full width. A draft is marked as one.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                {% if ticket.body %}
+                <article class="thread__msg thread__msg--inbound u-mb-6">
+                    <div class="thread__meta">
+                        <span class="thread__who">
+                            {{ ticket.customer_label|truncatechars:40 }}
+                        </span>
+                        <span class="badge badge--info">The original request</span>
+                        <span>{{ ticket.created_at|date:"j M Y H:i" }}</span>
+                    </div>
+                    <p class="thread__body">{{ ticket.body }}</p>
+                </article>
+                {% endif %}
+
+                {% if thread %}
+                <div class="thread">
+                    {% for message in thread %}
+                    <article class="thread__msg thread__msg--{{ message.direction }}{% if message.is_ai_draft and not message.was_sent %} thread__msg--draft{% endif %}">
+                        <div class="thread__meta">
+                            <span class="thread__who">
+                                {{ message.author_label|default:message.get_direction_display }}
+                            </span>
+                            <span class="chip">{{ message.get_direction_display }}</span>
+
+                            {% if message.is_ai_draft and not message.was_sent %}
+                            <span class="badge badge--warning">
+                                <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
+                                Draft, not sent
+                            </span>
+                            {% elif message.was_sent %}
+                            <span class="badge badge--success">
+                                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                                {{ message.sent_message.get_status_display }}
+                            </span>
+                            {% endif %}
+
+                            <span>{{ message.created_at|date:"j M Y H:i" }}</span>
+                        </div>
+
+                        <p class="thread__body">{{ message.body }}</p>
+
+                        {% if message.is_ai_draft and not message.was_sent %}
+                        <p class="thread__note">
+                            Written by an AI employee and not approved. The customer has not
+                            received this.
+                        </p>
+                        {% elif message.was_sent %}
+                        <p class="u-text-xs u-text-subtle u-mt-2 u-mb-0">
+                            Sent {{ message.sent_message.sent_at|date:"j M Y H:i" }}
+                            to {{ message.sent_message.recipient|default:"an unrecorded address" }}
+                            via {{ message.sent_message.get_channel_display }}.
+                        </p>
+                        {% endif %}
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-comment-slash" title="Nothing has been written back" message="Ask Customer Support to draft a reply grounded in company policy. It writes the draft into this thread first, so the text is reviewable before it is anything else." action_url=agents_url action_label="Talk to Customer Support" %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 3. Resolution and escalation ----------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                    Resolution and escalation
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="factlist">
+                    <div>
+                        <p class="factlist__key">Resolution</p>
+                        <p class="factlist__value">
+                            {% if ticket.resolution %}
+                                {{ ticket.resolution }}
+                            {% else %}
+                                Nothing recorded yet.
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="factlist__key">Escalated to</p>
+                        <p class="factlist__value">
+                            {% if ticket.escalated_to %}
+                                {{ ticket.escalated_to }}
+                                {% if ticket.escalation_reason %}
+                                <br><span class="u-text-xs u-text-subtle">
+                                    {{ ticket.escalation_reason }}
+                                </span>
+                                {% endif %}
+                            {% else %}
+                                Not escalated.
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div>
+                        <p class="factlist__key">External reference</p>
+                        <p class="factlist__value">
+                            {% if ticket.external_reference %}
+                                {% if ticket.external_url %}
+                                <a href="{{ ticket.external_url }}" target="_blank"
+                                   rel="noopener noreferrer">
+                                    {{ ticket.external_reference }}
+                                    <i class="fa-solid fa-arrow-up-right-from-square"
+                                       aria-hidden="true"></i>
+                                </a>
+                                {% else %}
+                                <span class="chip chip--mono">{{ ticket.external_reference }}</span>
+                                {% endif %}
+                            {% else %}
+                                This ticket has not been filed outside the platform.
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. Prepared actions -------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                        Actions waiting on a person
+                    </h2>
+                    <p class="card__subtitle">
+                        A reply to a customer, an escalation, a Jira issue. Each one carries
+                        its full text for a reviewer to read and edit before approving.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if actions %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Action</th>
+                                <th scope="col">Reaches</th>
+                                <th scope="col">Risk</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Decision</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for action in actions %}
+                            <tr>
+                                <td data-label="Action">
+                                    <a href="{% url 'action_detail' action.pk %}">
+                                        <i class="fa-solid {{ action.icon }}" aria-hidden="true"></i>
+                                        {{ action.title|truncatechars:60 }}
+                                    </a>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        prepared by {{ action.agent.name|default:"an AI employee" }}
+                                        {% if action.was_edited %}
+                                        &middot; edited {{ action.edit_count }} time{{ action.edit_count|pluralize }}
+                                        {% endif %}
+                                    </span>
+                                </td>
+                                <td data-label="Reaches">{{ action.target_app }}</td>
+                                <td data-label="Risk">
+                                    <span class="prio prio--{% if action.risk == 'high' %}critical{% elif action.risk == 'medium' %}high{% else %}low{% endif %}">
+                                        {{ action.get_risk_display }}
+                                    </span>
+                                </td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                                </td>
+                                <td data-label="Decision">{{ action.decision_summary }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing prepared for this ticket" message="Ask Customer Support to draft a reply. The draft goes to the approval queue with its full text; nothing reaches the customer until somebody releases it." action_url=agents_url action_label="Talk to Customer Support" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        {% if duplicates %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-clone" aria-hidden="true"></i>
+                    Tickets recorded as duplicates of this one
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="chip-set">
+                    {% for other in duplicates %}
+                    <a class="chip chip--mono" href="{% url 'ops_ticket' other.pk %}">
+                        {{ other.reference }}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+
+    <!-- ============ Right: triage and the customer ============ -->
+    <div class="stack">
+
+        <!-- 2. The triage record -------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+                        The triage record
+                    </h2>
+                    <p class="card__subtitle">
+                        Set by deterministic keyword rules, not by a language model, so the
+                        priority can be explained afterwards.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Category</span>
+                        <span class="datalist__value">{{ ticket.get_category_display }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Priority</span>
+                        <span class="datalist__value" id="ticketPriorityLabel">
+                            {{ ticket.get_priority_display }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Status</span>
+                        <span class="datalist__value" id="ticketStatusLabel">
+                            {{ ticket.get_status_display }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Sentiment</span>
+                        <span class="datalist__value">{{ ticket.get_sentiment_display }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Assignee</span>
+                        <span class="datalist__value" id="ticketAssigneeLabel">
+                            {{ ticket.assignee.username|default:"Unassigned" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Triaged by</span>
+                        <span class="datalist__value">
+                            {{ ticket.assigned_agent.name|default:ticket.created_by_agent.name|default:"Not recorded" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Arrived</span>
+                        <span class="datalist__value">{{ ticket.created_at|date:"j M Y H:i" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">First response</span>
+                        <span class="datalist__value">
+                            {{ ticket.first_response_at|date:"j M Y H:i"|default:"None yet" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Response target</span>
+                        <span class="datalist__value">
+                            {% if ticket.is_breaching_sla %}
+                            <span class="sla sla--breach">
+                                Breached {{ ticket.sla_due_at|timesince }} ago
+                            </span>
+                            {% elif ticket.sla_due_at %}
+                            <span class="sla sla--ok">{{ ticket.sla_due_at|date:"j M H:i" }}</span>
+                            {% else %}
+                            <span class="sla sla--none">No target set</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% if ticket.reopened_count %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Reopened</span>
+                        <span class="datalist__value">
+                            {{ ticket.reopened_count }} time{{ ticket.reopened_count|pluralize }}
+                        </span>
+                    </div>
+                    {% endif %}
+                    {% if ticket.duplicate_of_id %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Duplicate of</span>
+                        <span class="datalist__value">
+                            <a href="{% url 'ops_ticket' ticket.duplicate_of.pk %}">
+                                {{ ticket.duplicate_of.reference }}
+                            </a>
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <p class="factlist__key u-mt-6">Why this priority</p>
+                {% if urgency_signals %}
+                <div class="chip-set">
+                    {% for signal in urgency_signals %}
+                    <span class="chip">&ldquo;{{ signal }}&rdquo;</span>
+                    {% endfor %}
+                </div>
+                <p class="u-text-xs u-text-subtle u-mt-2 u-mb-0">
+                    These are the customer's own phrases that fired the rule. A priority you
+                    cannot explain is a priority you cannot defend to the customer whose
+                    ticket sits below it.
+                </p>
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">
+                    No urgency signals were recorded, so this priority came from the default
+                    rather than from anything the customer wrote.
+                </p>
+                {% endif %}
+
+                {% if ticket.tags.all %}
+                <p class="factlist__key u-mt-6">Tags</p>
+                <div class="chip-set">
+                    {% for tag in ticket.tags.all %}
+                    <span class="chip chip--mono">{{ tag.name }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+            {% if can_manage %}
+            <div class="card__body">
+                <div class="form-field">
+                    <label class="form-field__label" for="ticketStatusSelect">Status</label>
+                    <select class="form-select" id="ticketStatusSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="ticket"
+                            data-ops-id="{{ ticket.pk }}"
+                            data-ops-field="status"
+                            data-ops-current="{{ ticket.status }}"
+                            data-ops-display="#ticketStatusLabel">
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if ticket.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Resolving a ticket stamps the resolution time, which is what the SLA
+                        report is computed from. It sends nothing.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field__label" for="ticketPrioritySelect">Priority</label>
+                    <select class="form-select" id="ticketPrioritySelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="ticket"
+                            data-ops-id="{{ ticket.pk }}"
+                            data-ops-field="priority"
+                            data-ops-current="{{ ticket.priority }}"
+                            data-ops-display="#ticketPriorityLabel">
+                        {% for value, label in priority_choices %}
+                        <option value="{{ value }}" {% if ticket.priority == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field__label" for="ticketAssigneeSelect">Assignee</label>
+                    <select class="form-select" id="ticketAssigneeSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="ticket"
+                            data-ops-id="{{ ticket.pk }}"
+                            data-ops-field="assignee"
+                            data-ops-current="{{ ticket.assignee_id|default_if_none:'' }}"
+                            data-ops-display="#ticketAssigneeLabel">
+                        <option value="">Unassigned</option>
+                        {% for pk, username in assignee_choices %}
+                        <option value="{{ pk }}" {% if ticket.assignee_id == pk %}selected{% endif %}>{{ username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- 5. The customer -------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div class="u-flex u-items-center u-gap-3">
+                    <span class="avatar avatar--sm avatar--round"
+                          style="background: var(--color-info);">
+                        {% if ticket.customer %}{{ ticket.customer.initials }}{% else %}??{% endif %}
+                    </span>
+                    <div>
+                        <h2 class="card__title u-m-0">
+                            {{ ticket.customer_label|truncatechars:36 }}
+                        </h2>
+                        {% if ticket.customer %}
+                        <p class="card__subtitle u-m-0">
+                            {{ ticket.customer.get_tier_display }} tier
+                        </p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="card__body">
+                {% if ticket.customer %}
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Reply to</span>
+                        <span class="datalist__value">{{ ticket.contact_address|default:"No address" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Company</span>
+                        <span class="datalist__value">
+                            {{ ticket.customer.company|default:"Not recorded" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Account</span>
+                        <span class="datalist__value">
+                            {{ ticket.customer.account_reference|default:"Not recorded" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Timezone</span>
+                        <span class="datalist__value">
+                            {{ ticket.customer.timezone_name|default:"Not recorded" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Open tickets</span>
+                        <span class="datalist__value">{{ ticket.customer.open_ticket_count }}</span>
+                    </div>
+                </div>
+                {% if ticket.customer.timezone_name %}
+                <p class="u-text-xs u-text-subtle u-mt-4 u-mb-0">
+                    Any time promised in a reply is read in {{ ticket.customer.timezone_name }},
+                    so the promise means what it says.
+                </p>
+                {% endif %}
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">
+                    No customer record is linked. The ticket carries the address it arrived
+                    from ({{ ticket.contact_email|default:"none recorded" }}), which is
+                    deliberate: requiring a customer row first would mean either losing the
+                    request or inventing a record from an email signature.
+                </p>
+                {% endif %}
+            </div>
+        </section>
+
+        {% if other_tickets %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+                    Their other tickets
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Ticket</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for other in other_tickets %}
+                            <tr {% if other.needs_human %}class="row--flagged"{% endif %}>
+                                <td data-label="Ticket">
+                                    <a href="{% url 'ops_ticket' other.pk %}">
+                                        <span class="u-mono">{{ other.reference }}</span>
+                                        {{ other.subject|truncatechars:38 }}
+                                    </a>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ other.created_at|date:"j M Y" }}
+                                        &middot; {{ other.get_category_display }}
+                                    </span>
+                                </td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=other.status label=other.get_status_display %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

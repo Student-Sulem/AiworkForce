@@ -1,0 +1,329 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    THE ORCHESTRATOR CONSOLE -- one input box, and an honest account of what
+    the platform did with what you typed.
+    Rendered by marketing.views_actions.orchestrator_view at the URL named
+    'orchestrator'.
+
+    WHY THE ROUTING IS SHOWN AND NOT JUST APPLIED
+    ---------------------------------------------
+    Choosing which employee handles a request is a decision the platform makes
+    on somebody's behalf, and a decision made on your behalf should be
+    inspectable. So the console shows the chosen employee, the confidence as a
+    bar, the reasoning in words, and the scores of the employees that were not
+    chosen. A reviewer who disagrees can see exactly what to disagree with.
+
+    WHY THERE ARE EXAMPLE REQUESTS
+    An empty text box is not usable by somebody who has never seen the
+    platform. Six clickable sentences, one per employee, turn it into something
+    a first-time user can actually start with.
+
+    STRUCTURE
+        1. The console         the input, and the three result panels
+        2. The six employees   role, description and an example each
+        3. Recent routing      the OrchestratorDecision rows
+
+    The result panels are empty markup filled by static/js/actions.js from the
+    JSON that api_orchestrate returns. They are hidden rather than absent so
+    the page never reflows into a different shape while somebody is reading it.
+{% endcomment %}
+
+{% block title %}Orchestrator | AI Workforce{% endblock %}
+{% block body_class %}page-orchestrator{% endblock %}
+{% block page_title %}Orchestrator{% endblock %}
+{% block page_subtitle %}
+    Describe what you need. The platform chooses the employee, tells you why,
+    and shows you what it did.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'actions' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Approval queue
+    </a>
+{% endblock %}
+
+{% block content %}
+
+{% if not router_ready %}
+<div class="alert alert--warning" role="alert">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <span>
+        The orchestrator module is not available in this build, so a request
+        cannot be routed yet. The employees and the routing history below still
+        read correctly.
+    </span>
+</div>
+{% endif %}
+
+<!-- 1. The console -->
+<section class="card u-mb-6" aria-labelledby="consoleTitle">
+    <div class="card__header">
+        <h2 class="card__title" id="consoleTitle">
+            <i class="fa-solid fa-shuffle" aria-hidden="true"></i> Describe what you need
+        </h2>
+    </div>
+    <div class="card__body">
+        {% if can_chat %}
+        <form id="orchestratorForm" data-url="{% url 'api_orchestrate' %}">
+            <div class="form-field">
+                <label class="form-field__label" for="orchestratorInput">
+                    Your request
+                    <span class="form-field__required" aria-hidden="true">*</span>
+                </label>
+                <textarea class="form-textarea" id="orchestratorInput" name="request_text"
+                          rows="4" required
+                          placeholder="For example: draft a reply to the customer whose export is stuck, and file an engineering issue for it."></textarea>
+                <p class="form-field__hint">
+                    Write it as you would to a colleague. Anything that would leave
+                    the company is prepared and placed in the approval queue, never
+                    sent straight out.
+                </p>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn--primary" type="submit" id="orchestratorSubmit">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Route this request
+                </button>
+            </div>
+        </form>
+
+        <div class="example-set u-mt-4">
+            <p class="example-set__caption u-text-xs u-text-subtle u-m-0">
+                Or start from one of these:
+            </p>
+            <div class="chip-set u-mt-2">
+                {% for employee in employees %}
+                {% if employee.example %}
+                <button class="chip example-chip" type="button"
+                        data-example="{{ employee.example }}"
+                        title="Typical of {{ employee.name }}">
+                    <i class="fa-solid {{ employee.icon }}"
+                       style="color: {{ employee.color }};" aria-hidden="true"></i>
+                    {{ employee.name }}
+                </button>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert--info">
+            <i class="fa-solid fa-lock" aria-hidden="true"></i>
+            <span>
+                Your role can read the routing history but cannot ask an employee
+                to do something. Asking is an Analyst capability or above.
+            </span>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- 1a. The routing decision. Filled by actions.js. -->
+<section class="card u-mb-6" id="routingPanel" aria-labelledby="routingTitle" hidden>
+    <div class="card__header">
+        <h2 class="card__title" id="routingTitle">
+            <i class="fa-solid fa-route" aria-hidden="true"></i> The routing decision
+        </h2>
+        <span class="badge badge--neutral" id="routingMethod"></span>
+    </div>
+    <div class="card__body">
+        <div class="routed-to">
+            <span class="routed-to__avatar" id="routedAvatar" aria-hidden="true">
+                <i class="fa-solid fa-robot"></i>
+            </span>
+            <div class="u-grow">
+                <p class="routed-to__name u-m-0" id="routedName"></p>
+                <p class="routed-to__role u-text-sm u-text-muted u-m-0" id="routedRole"></p>
+            </div>
+            <a class="btn btn--ghost btn--sm" id="routedLink" href="#" hidden>
+                Profile <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </a>
+        </div>
+
+        <div class="confidence u-mt-4">
+            <div class="confidence__head">
+                <span class="confidence__label">Confidence</span>
+                <span class="confidence__value" id="confidenceValue">0%</span>
+            </div>
+            {# The bar itself is workforce.css's shared .meter, which exists for
+               exactly this: a score expressed as a width, driven by a --value
+               custom property so nothing has to do arithmetic in a style
+               attribute. It is decoration, and the number beside it is what a
+               screen reader announces, so it is hidden from the tree. #}
+            <div class="meter confidence__track" id="confidenceTrack"
+                 style="--value: 0%;" aria-hidden="true">
+                <span class="meter__fill" id="confidenceFill"></span>
+            </div>
+        </div>
+
+        <p class="routing-reason u-mt-4" id="routingReason"></p>
+
+        <div id="candidatesBlock" hidden>
+            <p class="u-text-sm u-semibold u-mt-6 u-mb-2">
+                The employees that were not chosen
+            </p>
+            <p class="u-text-xs u-text-subtle u-mb-4">
+                Shown so the choice is inspectable rather than magic.
+            </p>
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Employee</th>
+                            <th scope="col">Score</th>
+                            <th scope="col">Why it scored</th>
+                        </tr>
+                    </thead>
+                    <tbody id="candidatesBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 1b. What the chosen employee actually did. Filled by actions.js. -->
+<section class="card u-mb-6" id="resultPanel" aria-labelledby="resultTitle" hidden>
+    <div class="card__header">
+        <h2 class="card__title" id="resultTitle">
+            <i class="fa-solid fa-comment-dots" aria-hidden="true"></i> What the employee did
+        </h2>
+        <span class="badge badge--neutral" id="resultTask" hidden></span>
+    </div>
+    <div class="card__body">
+        <div class="alert alert--danger" id="resultError" role="alert" hidden>
+            <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+            <span id="resultErrorText"></span>
+        </div>
+
+        <div class="preview preview--full" id="resultReply"></div>
+
+        <div class="chip-set u-mt-4" id="resultTools"></div>
+
+        <div id="resultActionsBlock" hidden>
+            <p class="u-text-sm u-semibold u-mt-6 u-mb-2">
+                Prepared and waiting for approval
+            </p>
+            <p class="u-text-xs u-text-subtle u-mb-4">
+                None of these has happened. Each one needs a person to decide.
+            </p>
+            <ul class="proposed-list" id="resultActions"></ul>
+        </div>
+    </div>
+</section>
+
+<!-- 1c. A suggested multi-employee workflow. Filled by actions.js. -->
+<section class="card u-mb-6" id="workflowPanel" aria-labelledby="workflowTitle" hidden>
+    <div class="card__header">
+        <h2 class="card__title" id="workflowTitle">
+            <i class="fa-solid fa-sitemap" aria-hidden="true"></i> Suggested workflow
+        </h2>
+    </div>
+    <div class="card__body">
+        <p class="u-text-sm u-text-muted u-mb-4">
+            This request looks as though it needs more than one employee. Here is
+            the order that would work, and why each one is in it.
+        </p>
+        <ol class="workflow-steps" id="workflowSteps"></ol>
+    </div>
+</section>
+
+<!-- 2. The six employees -->
+<h2 class="roster-heading">The roster</h2>
+<p class="u-text-sm u-text-muted u-mb-4">
+    Six employees, identified by the job they do. You can address one directly
+    from the AI Employees page, or let the orchestrator choose.
+</p>
+
+<div class="grid grid-cards u-mb-6">
+    {% for employee in employees %}
+    <article class="card roster-card">
+        <div class="card__body">
+            <div class="u-flex u-items-center u-gap-3 u-mb-4">
+                <span class="avatar avatar--lg" style="background: {{ employee.color }};">
+                    <i class="fa-solid {{ employee.icon }}" aria-hidden="true"></i>
+                </span>
+                <div class="u-grow">
+                    <h3 class="card__title u-m-0">
+                        <a href="{{ employee.url }}">{{ employee.name }}</a>
+                    </h3>
+                    <p class="card__subtitle">{{ employee.role }}</p>
+                </div>
+            </div>
+
+            <p class="u-text-sm u-text-muted u-clamp-3">{{ employee.description }}</p>
+
+            {% if employee.example and can_chat %}
+            <button class="example-request" type="button" data-example="{{ employee.example }}">
+                <span class="example-request__caption">Try asking</span>
+                <span class="example-request__text">{{ employee.example }}</span>
+            </button>
+            {% elif employee.example %}
+            <p class="example-request example-request--static">
+                <span class="example-request__caption">Typical request</span>
+                <span class="example-request__text">{{ employee.example }}</span>
+            </p>
+            {% endif %}
+        </div>
+    </article>
+    {% endfor %}
+</div>
+
+<!-- 3. Where recent requests went -->
+<section class="card" aria-labelledby="historyTitle">
+    <div class="card__header">
+        <h2 class="card__title" id="historyTitle">
+            <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+            Recent routing
+        </h2>
+    </div>
+    <div class="card__body card__body--flush">
+        {% if decisions %}
+        <div class="table-wrap">
+            <table class="table table--stack">
+                <thead>
+                    <tr>
+                        <th scope="col">Asked</th>
+                        <th scope="col">Went to</th>
+                        <th scope="col">Confidence</th>
+                        <th scope="col">Method</th>
+                        <th scope="col">When</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for decision in decisions %}
+                    <tr>
+                        <td data-label="Asked" class="u-break">
+                            {{ decision.request_text|truncatechars:110 }}
+                        </td>
+                        <td data-label="Went to">
+                            {% if decision.chosen_agent %}
+                            <a href="{% url 'employee_profile' decision.chosen_agent.agent_type %}">
+                                {{ decision.chosen_agent.name }}
+                            </a>
+                            {% else %}
+                            <span class="u-text-subtle">nobody</span>
+                            {% endif %}
+                        </td>
+                        <td data-label="Confidence">{{ decision.confidence }}</td>
+                        <td data-label="Method">
+                            <span class="chip chip--mono">{{ decision.method }}</span>
+                        </td>
+                        <td data-label="When">{{ decision.created_at|timesince }} ago</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="card__body">
+            {% include 'partials/_empty_state.html' with icon="fa-route" title="Nothing has been routed yet" message="Describe what you need in the box above. Every routing decision is recorded here afterwards, with the employee it went to and how confident the choice was." %}
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/actions.js' %}" defer></script>
+{% endblock %}

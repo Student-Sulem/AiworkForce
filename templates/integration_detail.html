@@ -1,0 +1,724 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    One integration in full.
+    Rendered by marketing.views_platform.integration_detail_view at the URL
+    named 'integration_detail', addressed by provider_key rather than by
+    primary key so the URL reads /integrations/slack/ and survives a reseed.
+
+    WHY THIS PAGE EARNS ITS PLACE
+    The card on the Integrations page answers "is this connection working".
+    This page answers the question that follows: "what stops working if it is
+    not". The dependants section is derived from the tool registry -- every
+    registered tool that declares this integration -- and grouped by the AI
+    employees that own those tools. So the page can say that four of the HR
+    employee's capabilities are being simulated, which is the fact somebody
+    needs in order to decide whether to go and find a credential.
+
+    Everything below the configuration is the record of what this connection
+    has actually done: the audit entries, the actions that queued for approval
+    through it, and the execution records those approvals produced.
+
+    CalendarEvent and ExternalIssue carry no integration column of their own,
+    so they are reached through the approved action that created them. That is
+    the only honest link available and the view says so.
+
+    The configuration form here is inline rather than in a dialog: on a page
+    about one connection there is nothing to dismiss it back to. It carries
+    the same data-config-form contract as the dialogs on the Integrations
+    page, so static/js/integrations.js handles both with one submit handler.
+
+    No secret value appears anywhere below. A credential shows as
+    "(currently set)" or "(not set)".
+{% endcomment %}
+
+{% block title %}{{ integration.name }} | Integrations{% endblock %}
+{% block body_class %}page-integrations{% endblock %}
+{% block page_title %}{{ integration.name }}{% endblock %}
+{% block page_subtitle %}
+    {{ integration.get_category_display }} &middot; {{ card.mode_meta.explanation }}
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'integrations' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> All integrations
+    </a>
+    <a href="{% url 'audit_log' %}?app={{ integration.name|urlencode }}" class="btn btn--secondary">
+        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Full history
+    </a>
+    {% if perms.marketing.test_integration %}
+    <button class="btn btn--primary" type="button"
+            data-test-integration="{{ integration.provider_key }}"
+            data-test-url="{% url 'api_integration_test' %}">
+        <i class="fa-solid fa-plug" aria-hidden="true"></i> Test connection
+    </button>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# The mode wording, shared with integrations.js so a test repaints with the same sentences. #}
+{{ mode_meta|json_script:"integrationModeMeta" }}
+
+<div data-integration-card data-provider-key="{{ integration.provider_key }}"
+     data-integration-name="{{ integration.name }}">
+
+<div class="grid grid-2 u-mb-6">
+
+    <!-- ------------------------------------------------------------------
+         Status. The last check message is shown verbatim, including when it
+         is a failure: a connector's own words about why it could not connect
+         are more useful than any sentence this template could write.
+         ------------------------------------------------------------------ -->
+    <section class="card">
+        <div class="card__header">
+            <div class="u-flex u-items-center u-gap-3">
+                <span class="avatar avatar--lg" style="background: {{ integration.color }};">
+                    <i class="fa-{% if card.is_brand_icon %}brands{% else %}solid{% endif %} {{ integration.icon }}"
+                       aria-hidden="true"></i>
+                </span>
+                <div>
+                    <h2 class="card__title u-m-0">Connection</h2>
+                    <p class="card__subtitle u-m-0">
+                        <code>{{ integration.provider_key }}</code>
+                    </p>
+                </div>
+            </div>
+            <span class="badge badge--{{ card.status_tone }}" data-status-pill>
+                <span class="badge__dot" aria-hidden="true"></span>
+                {{ integration.get_connection_status_display }}
+            </span>
+        </div>
+
+        <div class="card__body">
+            <div class="mode-pill mode-pill--{{ card.mode }}" data-mode-block>
+                <span class="mode-pill__label" data-mode-label>
+                    <i class="fa-solid {{ card.mode_meta.icon }}" aria-hidden="true"></i>
+                    {{ card.mode_meta.label }}
+                </span>
+                <span class="mode-pill__text" data-mode-text>{{ card.mode_meta.explanation }}</span>
+            </div>
+
+            <div class="alert alert--info u-mt-4" data-test-result
+                 {% if not integration.last_status_message %}hidden{% endif %} role="status">
+                {{ integration.last_status_message }}
+            </div>
+
+            <div class="missing-list u-mt-4" data-missing-block
+                 {% if not card.missing %}hidden{% endif %}>
+                <p class="missing-list__title u-m-0">
+                    <i class="fa-solid fa-key" aria-hidden="true"></i> Still needed before it can run live
+                </p>
+                <ul class="missing-list__items" data-missing-items>
+                    {% for label in card.missing %}<li>{{ label }}</li>{% endfor %}
+                </ul>
+            </div>
+
+            <div class="datalist u-mt-4">
+                <div class="datalist__row">
+                    <span class="datalist__key">Behaviour</span>
+                    <span class="datalist__value" data-mode-display>{{ integration.get_mode_display }}</span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Enabled</span>
+                    <span class="datalist__value">
+                        {% if integration.is_enabled %}Yes{% else %}No -- calls are refused{% endif %}
+                    </span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Last checked</span>
+                    <span class="datalist__value">
+                        {% if integration.last_checked_at %}
+                            {{ integration.last_checked_at|timesince }} ago
+                        {% else %}
+                            <span class="u-text-subtle">Never checked</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Calls</span>
+                    <span class="datalist__value">
+                        <span data-live-calls>{{ integration.live_call_count }}</span> live
+                        &middot;
+                        <span data-demo-calls>{{ integration.demo_call_count }}</span> simulated
+                    </span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Last used</span>
+                    <span class="datalist__value">
+                        {% if integration.last_used_at %}
+                            {{ integration.last_used_at|timesince }} ago
+                        {% else %}
+                            <span class="u-text-subtle">Never</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="datalist__row">
+                    <span class="datalist__key">Configured by</span>
+                    <span class="datalist__value">
+                        {{ integration.configured_by.username|default:"the platform" }}
+                        &middot; {{ integration.updated_at|timesince }} ago
+                    </span>
+                </div>
+            </div>
+
+            <p class="u-text-sm u-text-muted u-mt-4">{{ integration.description }}</p>
+        </div>
+
+        <div class="card__footer">
+            <label class="switch">
+                <input class="switch__input" type="checkbox"
+                       {% if integration.is_enabled %}checked{% endif %}
+                       {% if not perms.marketing.configure_integration %}disabled{% endif %}
+                       data-toggle-integration="{{ integration.provider_key }}"
+                       data-toggle-url="{% url 'api_integration_toggle' %}"
+                       data-actions-url="{{ actions_url }}">
+                <span class="switch__track"></span>
+                <span class="switch__label">Enabled</span>
+            </label>
+            <div class="u-grow"></div>
+            {% if card.docs_url %}
+            <a href="{{ card.docs_url }}" class="btn btn--ghost btn--sm"
+               target="_blank" rel="noopener noreferrer">
+                Provider documentation
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------
+         Configuration. Read-only for anybody without the permission, and the
+         endpoint enforces the same rule.
+         ------------------------------------------------------------------ -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-gear" aria-hidden="true"></i> Configuration
+            </h2>
+            {% if not perms.marketing.configure_integration %}
+            <span class="badge badge--neutral">
+                <i class="fa-solid fa-lock" aria-hidden="true"></i> Read only
+            </span>
+            {% endif %}
+        </div>
+
+        <div class="card__body">
+            {% if not card.has_connector %}
+            <div class="alert alert--danger">
+                <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+                <span>
+                    No connector is installed for <code>{{ integration.provider_key }}</code>.
+                    The row is kept rather than deleted, because a stored configuration
+                    should outlive a connector file being renamed.
+                </span>
+            </div>
+
+            {% elif perms.marketing.configure_integration %}
+
+            {% if card.credential_help %}
+            <div class="alert alert--info u-mb-4">
+                <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                <span>
+                    <strong>Where to get the credential.</strong>
+                    {% for entry in card.credential_help %}
+                    <br>{{ entry.label }}: {{ entry.help_text }}
+                    {% endfor %}
+                </span>
+            </div>
+            {% endif %}
+
+            <form data-config-form
+                  data-provider-key="{{ integration.provider_key }}"
+                  data-integration-name="{{ integration.name }}"
+                  data-configure-url="{% url 'api_integration_configure' %}"
+                  data-actions-url="{{ actions_url }}">
+
+                <div class="form-field">
+                    <label class="form-field__label" for="detail-mode">Behaviour when called</label>
+                    <select class="form-select" id="detail-mode" data-config-mode>
+                        {% for value, label in mode_choices %}
+                        <option value="{{ value }}"
+                                {% if integration.mode == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Automatic runs live once the required settings are present and simulates
+                        until then. Live only refuses instead of simulating. Demo only simulates
+                        even when the credential works.
+                    </p>
+                </div>
+
+                {% for field in card.fields %}
+                <div class="form-field">
+                    <label class="form-field__label" for="detail-cfg-{{ field.key }}">
+                        {{ field.label }}
+                        {% if field.required %}
+                        <span class="form-field__required" aria-hidden="true">*</span>
+                        {% endif %}
+                        {% if field.secret %}
+                            {% if field.is_set %}
+                            <span class="badge badge--success">currently set</span>
+                            {% else %}
+                            <span class="badge badge--warning">not set</span>
+                            {% endif %}
+                        {% endif %}
+                    </label>
+
+                    {% if field.field_type == 'longtext' %}
+                    <textarea class="form-textarea" id="detail-cfg-{{ field.key }}"
+                              data-config-field="{{ field.key }}" rows="4"
+                              placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+
+                    {% elif field.field_type == 'password' %}
+                    <input class="form-input" type="password" id="detail-cfg-{{ field.key }}"
+                           data-config-field="{{ field.key }}"
+                           autocomplete="new-password" spellcheck="false"
+                           placeholder="{% if field.is_set %}Leave blank to keep the stored value{% else %}{{ field.placeholder|default:'Paste the credential' }}{% endif %}">
+
+                    {% elif field.field_type == 'boolean' %}
+                    <label class="form-check-row">
+                        <input class="form-check" type="checkbox" id="detail-cfg-{{ field.key }}"
+                               data-config-field="{{ field.key }}"
+                               {% if field.value %}checked{% endif %}>
+                        Yes
+                    </label>
+
+                    {% elif field.field_type == 'choice' %}
+                    <select class="form-select" id="detail-cfg-{{ field.key }}"
+                            data-config-field="{{ field.key }}">
+                        {% for choice in field.choices %}
+                        <option value="{{ choice }}"
+                                {% if field.value|stringformat:"s" == choice|stringformat:"s" %}selected{% endif %}>{{ choice }}</option>
+                        {% endfor %}
+                    </select>
+
+                    {% elif field.field_type == 'number' %}
+                    <input class="form-input" type="number" id="detail-cfg-{{ field.key }}"
+                           data-config-field="{{ field.key }}" value="{{ field.value }}"
+                           placeholder="{{ field.placeholder }}">
+
+                    {% elif field.field_type == 'url' %}
+                    <input class="form-input" type="url" id="detail-cfg-{{ field.key }}"
+                           data-config-field="{{ field.key }}" value="{{ field.value }}"
+                           placeholder="{{ field.placeholder|default:'https://' }}">
+
+                    {% else %}
+                    <input class="form-input" type="text" id="detail-cfg-{{ field.key }}"
+                           data-config-field="{{ field.key }}" value="{{ field.value }}"
+                           placeholder="{{ field.placeholder }}">
+                    {% endif %}
+
+                    {% if field.help_text %}
+                    <p class="form-field__hint">{{ field.help_text }}</p>
+                    {% endif %}
+
+                    {% if field.secret and field.is_set %}
+                    <label class="form-check-row u-text-xs">
+                        <input class="form-check" type="checkbox" data-clear-secret="{{ field.key }}">
+                        Remove the stored value instead of replacing it
+                    </label>
+                    {% endif %}
+                </div>
+                {% endfor %}
+
+                <div class="alert alert--info" data-config-result hidden role="status"></div>
+
+                <div class="form-actions">
+                    <button class="btn btn--primary" type="submit" data-config-submit>
+                        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save settings
+                    </button>
+                </div>
+            </form>
+
+            {% else %}
+            <!-- The masked view. Everything a reader may know, and nothing more. -->
+            <p class="u-text-sm u-text-muted">
+                Your role may read this configuration but not change it. Credentials are
+                reported as present or absent and are never sent to the browser.
+            </p>
+            <div class="datalist">
+                <div class="datalist__row">
+                    <span class="datalist__key">Behaviour</span>
+                    <span class="datalist__value">{{ integration.get_mode_display }}</span>
+                </div>
+                {% for field in card.fields %}
+                <div class="datalist__row">
+                    <span class="datalist__key">
+                        {{ field.label }}{% if field.required %} *{% endif %}
+                    </span>
+                    <span class="datalist__value u-break">
+                        {% if field.secret %}
+                            <span class="secret-value">
+                                {% if field.is_set %}(currently set){% else %}(not set){% endif %}
+                            </span>
+                        {% elif field.value == '' or field.value == None %}
+                            <span class="u-text-subtle">(not set)</span>
+                        {% else %}
+                            {{ field.value }}
+                        {% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<!-- ------------------------------------------------------------------
+     What this connection is for: the operations the connector advertises,
+     and the employees and capabilities that depend on it.
+     ------------------------------------------------------------------ -->
+<div class="grid grid-2 u-mb-6">
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
+                Operations ({{ card.operations|length }})
+            </h2>
+        </div>
+        <div class="card__body">
+            <p class="u-text-sm u-text-muted">
+                What the connector advertises it can do. Each one is implemented twice --
+                once against the real service and once as a simulation -- and the platform
+                records which of the two ran.
+            </p>
+            <div class="chip-set u-mt-4">
+                {% for operation in card.operations %}
+                <span class="chip chip--mono">{{ operation }}</span>
+                {% empty %}
+                <span class="u-text-xs u-text-subtle">
+                    This connector declares no operations.
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-robot" aria-hidden="true"></i>
+                What depends on this
+            </h2>
+            <span class="badge badge--{% if card.mode == 'live' %}success{% elif card.mode == 'demo' %}warning{% else %}danger{% endif %}">
+                {{ capability_count }} capabilit{{ capability_count|pluralize:"y,ies" }}
+            </span>
+        </div>
+        <div class="card__body">
+            {% if not registry_available %}
+            <div class="alert alert--warning">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span>
+                    The tool registry could not be read, so the list of dependent
+                    capabilities is not available. The connection itself is unaffected.
+                </span>
+            </div>
+
+            {% elif dependants %}
+            <p class="u-text-sm u-text-muted">
+                Derived from the tool registry, so a capability appears here because a
+                registered tool declares this integration -- not because a list was kept
+                up to date by hand.
+                {% if card.mode == 'demo' %}
+                Every one of these is currently <strong>simulated</strong>.
+                {% elif card.mode == 'unavailable' or card.mode == 'disabled' %}
+                Every one of these currently <strong>fails</strong> when called.
+                {% endif %}
+            </p>
+
+            <div class="stack u-mt-4">
+                {% for entry in dependants %}
+                <div class="dependant">
+                    <p class="dependant__who u-m-0">
+                        {% if entry.agent %}
+                        <span class="avatar avatar--sm avatar--round"
+                              style="background: {{ entry.agent.avatar_color }};">
+                            <i class="fa-solid {{ entry.agent.avatar_icon }}" aria-hidden="true"></i>
+                        </span>
+                        {{ entry.agent.name }}
+                        <span class="u-text-xs u-text-subtle">{{ entry.label }}</span>
+                        {% else %}
+                        {{ entry.label }}
+                        <span class="u-text-xs u-text-subtle">(not on the roster yet)</span>
+                        {% endif %}
+                    </p>
+                    <ul class="dependant__list">
+                        {% for capability in entry.capabilities %}
+                        <li>
+                            <span class="u-semibold">{{ capability.capability }}</span>
+                            <span class="u-text-xs u-text-subtle">{{ capability.group }}</span>
+                            {% if capability.requires_approval %}
+                            <span class="badge badge--warning">needs approval</span>
+                            {% endif %}
+                            <br>
+                            <code class="u-text-xs">{{ capability.name }}</code>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-robot" title="Nothing depends on this yet" message="No registered tool declares this integration, so no capability is affected by its state." %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<!-- ------------------------------------------------------------------
+     The record: what has actually happened through this connection.
+     ------------------------------------------------------------------ -->
+<div class="stack">
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent activity
+            </h2>
+            <a href="{% url 'audit_log' %}?app={{ integration.name|urlencode }}"
+               class="btn btn--ghost btn--sm">
+                Full audit trail <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </a>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if events %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">When</th>
+                            <th scope="col">Who</th>
+                            <th scope="col">Action</th>
+                            <th scope="col">Outcome</th>
+                            <th scope="col">Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in events %}
+                        <tr class="audit-row audit-row--{{ event.status }}">
+                            <td data-label="When">{{ event.created_at|timesince }} ago</td>
+                            <td data-label="Who">{{ event.actor_label }}</td>
+                            <td data-label="Action"><code>{{ event.action }}</code></td>
+                            <td data-label="Outcome">
+                                <span class="audit-status audit-status--{{ event.status }}">
+                                    {{ event.get_status_display }}
+                                </span>
+                            </td>
+                            <td data-label="Message" class="u-text-sm u-text-muted">
+                                {{ event.message|truncatechars:110 }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-clock-rotate-left" title="Nothing recorded yet" message="An entry is written here the first time an AI employee calls this integration." %}
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-list-check" aria-hidden="true"></i> Actions queued through this connection
+            </h2>
+            {% if actions_url %}
+            <a href="{{ actions_url }}" class="btn btn--ghost btn--sm">
+                Action queue <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            </a>
+            {% endif %}
+        </div>
+        <div class="card__body card__body--flush">
+            {% if actions %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Action</th>
+                            <th scope="col">Employee</th>
+                            <th scope="col">Risk</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Decided</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for action in actions %}
+                        <tr>
+                            <td data-label="Action">
+                                {% if action_detail_available %}
+                                <a href="{% url 'action_detail' action.pk %}">{{ action.title|truncatechars:70 }}</a>
+                                {% else %}
+                                {{ action.title|truncatechars:70 }}
+                                {% endif %}
+                                <br><code class="u-text-xs">{{ action.action_type }}</code>
+                            </td>
+                            <td data-label="Employee">{{ action.agent.name|default:"--" }}</td>
+                            <td data-label="Risk">
+                                <span class="badge badge--{% if action.risk == 'high' %}danger{% elif action.risk == 'medium' %}warning{% else %}neutral{% endif %}">
+                                    {{ action.get_risk_display }}
+                                </span>
+                            </td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display dot=True %}
+                                {% if action.executed_in_demo %}
+                                <span class="badge badge--warning">simulated</span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Decided" class="u-text-sm u-text-muted">
+                                {{ action.decision_summary }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-list-check" title="No actions yet" message="An action reaching outside the company through this connection waits here for a person before it happens." %}
+            {% endif %}
+        </div>
+    </section>
+
+    {% comment %}
+        Execution records. These are what an approved action actually did, and
+        each one says whether it was real or simulated -- which is why the
+        status column is never collapsed into a tick.
+    {% endcomment %}
+    {% if messages_sent %}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Messages sent
+            </h2>
+        </div>
+        <div class="card__body card__body--flush">
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Channel</th>
+                            <th scope="col">Recipient</th>
+                            <th scope="col">Subject</th>
+                            <th scope="col">Employee</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for message in messages_sent %}
+                        <tr>
+                            <td data-label="Channel">{{ message.get_channel_display }}</td>
+                            <td data-label="Recipient" class="u-break">{{ message.recipient|truncatechars:48 }}</td>
+                            <td data-label="Subject">{{ message.subject|truncatechars:60|default:"--" }}</td>
+                            <td data-label="Employee">{{ message.agent.name|default:"--" }}</td>
+                            <td data-label="Status">
+                                <span class="audit-status audit-status--{% if message.status == 'simulated' %}demo{% elif message.status == 'failed' %}failed{% else %}ok{% endif %}">
+                                    {{ message.get_status_display }}
+                                </span>
+                            </td>
+                            <td data-label="When">{{ message.sent_at|timesince }} ago</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if calendar_events %}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Meetings scheduled
+            </h2>
+        </div>
+        <div class="card__body card__body--flush">
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Meeting</th>
+                            <th scope="col">Starts</th>
+                            <th scope="col">Attendees</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in calendar_events %}
+                        <tr>
+                            <td data-label="Meeting">{{ event.title|truncatechars:70 }}</td>
+                            <td data-label="Starts">{{ event.start_at|date:"d M Y, H:i" }}</td>
+                            <td data-label="Attendees">{{ event.attendees|length }}</td>
+                            <td data-label="Status">
+                                <span class="audit-status audit-status--{% if event.status == 'simulated' %}demo{% elif event.status == 'cancelled' %}failed{% else %}ok{% endif %}">
+                                    {{ event.get_status_display }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if external_issues %}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-code-branch" aria-hidden="true"></i> Issues raised
+            </h2>
+        </div>
+        <div class="card__body card__body--flush">
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Reference</th>
+                            <th scope="col">Title</th>
+                            <th scope="col">Container</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for issue in external_issues %}
+                        <tr>
+                            <td data-label="Reference">
+                                {% if issue.url %}
+                                <a href="{{ issue.url }}" target="_blank" rel="noopener noreferrer">
+                                    {{ issue.reference|default:issue.get_system_display }}
+                                </a>
+                                {% else %}
+                                {{ issue.reference|default:issue.get_system_display }}
+                                {% endif %}
+                            </td>
+                            <td data-label="Title">{{ issue.title|truncatechars:70 }}</td>
+                            <td data-label="Container"><code>{{ issue.container|default:"--" }}</code></td>
+                            <td data-label="Status">
+                                <span class="audit-status audit-status--{% if issue.issue_status == 'simulated' %}demo{% else %}ok{% endif %}">
+                                    {{ issue.get_issue_status_display }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/integrations.js' %}" defer></script>
+{% endblock %}

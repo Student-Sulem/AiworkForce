@@ -1,0 +1,586 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one candidate.
+    Rendered by marketing.views_ops.candidate_detail_view at the URL named
+    'ops_candidate'.
+
+    THIS PAGE EXISTS FOR SECTION 3.
+
+    A score of 74 tells a reader nothing they can act on or defend. A table of
+    requirement, score out of its maximum, and the sentence from the resume
+    that earned it, tells them everything: which requirement was weak, whether
+    the evidence actually supports the number, and what to probe at interview.
+    That table is the whole justification for the People Operations employee
+    scoring anybody at all, so it is rendered in full rather than summarised.
+
+    STRUCTURE
+      1. the person       contact details, current role, skills, experience
+      2. the resume       the only substantive input to screening, scrollable
+      3. THE EVALUATION   score, breakdown with evidence, strengths, gaps,
+                          recommendation and rationale
+      4. interviews       with the generated questions and evaluation form
+      5. correspondence   what was sent, and what is prepared and waiting
+      6. earlier screens  the append-only evaluation history
+{% endcomment %}
+
+{% block title %}{{ candidate.full_name }} | Recruitment{% endblock %}
+{% block body_class %}page-ops page-ops-candidate{% endblock %}
+{% block page_title %}{{ candidate.full_name }}{% endblock %}
+{% block page_subtitle %}
+    {{ candidate.current_title|default:"Current role not recorded" }}
+    {% if candidate.current_company %}at {{ candidate.current_company }}{% endif %}
+    &middot; applied for
+    {% if candidate.job_opening %}
+        <a href="{% url 'ops_job' candidate.job_opening.pk %}">{{ candidate.job_opening.title }}</a>
+    {% else %}no particular opening{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_recruitment' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Recruitment
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this candidate
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<div class="detail-split">
+    <div class="stack">
+
+        <!-- 3. THE EVALUATION, first because it is what the page is for ---- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+                        The screening judgement
+                    </h2>
+                    <p class="card__subtitle">
+                        {% if evaluation %}
+                            Made {{ evaluation.created_at|date:"j M Y" }} by
+                            {{ evaluation.agent.name|default:"an AI employee" }}, against
+                            {% if evaluation.job_opening %}
+                                <a href="{% url 'ops_job' evaluation.job_opening.pk %}">{{ evaluation.job_opening.title }}</a>
+                            {% else %}the requirements as they then stood{% endif %}.
+                        {% else %}
+                            Nobody has screened this candidate yet.
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+
+            {% if evaluation %}
+            <div class="card__body">
+                <div class="u-flex u-gap-4 u-wrap u-items-start u-mb-6">
+                    <div class="score-big score-big--{{ evaluation.band }}">
+                        <span class="score-big__value">{{ evaluation.score|floatformat:1 }}</span>
+                        <span class="score-big__label">of 100</span>
+                    </div>
+                    <div class="u-grow">
+                        <p class="factlist__key">Recommendation</p>
+                        <p class="factlist__value u-semibold">
+                            {{ evaluation.get_recommendation_display }}
+                        </p>
+                        {% if evaluation.rationale %}
+                        <p class="factlist__key u-mt-4">Rationale</p>
+                        <p class="factlist__value">{{ evaluation.rationale }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <h3 class="card__title u-mb-2" id="breakdownHeading">
+                    Requirement by requirement, with the evidence
+                </h3>
+                <p class="u-text-xs u-text-subtle u-mb-4">
+                    Where the evidence column is empty the resume was silent, which is recorded
+                    as a gap rather than assumed either way.
+                </p>
+            </div>
+
+            <div class="card__body card__body--flush">
+                {% if breakdown %}
+                <div class="table-wrap">
+                    <table class="table table--stack" aria-describedby="breakdownHeading">
+                        <thead>
+                            <tr>
+                                <th scope="col">Requirement</th>
+                                <th scope="col">Score</th>
+                                <th scope="col">Share earned</th>
+                                <th scope="col">Evidence from the resume</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in breakdown %}
+                            <tr>
+                                <td data-label="Requirement">
+                                    <span class="u-semibold">{{ row.requirement }}</span>
+                                </td>
+                                <td data-label="Score">
+                                    <span class="chip chip--mono">
+                                        {{ row.score|default_if_none:"--" }}
+                                        {% if row.max %} / {{ row.max }}{% endif %}
+                                    </span>
+                                </td>
+                                <td data-label="Share earned" style="min-width:140px;">
+                                    <span class="progress-row">
+                                        <span class="progress" role="progressbar"
+                                              aria-valuenow="{{ row.percent }}"
+                                              aria-valuemin="0" aria-valuemax="100"
+                                              aria-label="{{ row.requirement }}: {{ row.percent }} per cent of the available points">
+                                            <span class="progress__bar{% if row.percent >= 75 %} progress__bar--success{% elif row.percent < 40 %} progress__bar--danger{% endif %}"
+                                                  style="width: {{ row.percent }}%;"></span>
+                                        </span>
+                                        <span class="progress__figure">{{ row.percent }}%</span>
+                                    </span>
+                                </td>
+                                <td data-label="Evidence from the resume">
+                                    {% if row.evidence %}
+                                        <span class="u-text-sm">{{ row.evidence }}</span>
+                                    {% else %}
+                                        <span class="u-text-xs u-text-subtle">
+                                            The resume said nothing about this.
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    <div class="alert alert--warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        <span>
+                            This evaluation carries a score but no breakdown, so the number
+                            cannot be explained. Ask People Operations to screen the candidate
+                            again against the opening's requirements.
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="card__body">
+                <div class="grid grid-2">
+                    <div>
+                        <p class="factlist__key">Strengths</p>
+                        {% if evaluation.strengths %}
+                        <ul class="criteria">
+                            {% for line in evaluation.strengths %}
+                            <li>
+                                <i class="fa-solid fa-circle-check"
+                                   style="color: var(--color-success);" aria-hidden="true"></i>
+                                <span>{{ line }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="u-text-sm u-text-muted u-m-0">None recorded.</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <p class="factlist__key">Gaps</p>
+                        {% if evaluation.gaps %}
+                        <ul class="criteria">
+                            {% for line in evaluation.gaps %}
+                            <li>
+                                <i class="fa-solid fa-circle-minus"
+                                   style="color: var(--color-danger);" aria-hidden="true"></i>
+                                <span>{{ line }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="u-text-sm u-text-muted u-m-0">None recorded.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {% include 'partials/_empty_state.html' with icon="fa-scale-unbalanced" title="Not screened yet" message="Ask People Operations to score this candidate against the opening. It works through one requirement at a time and quotes the sentence from the resume that earned each score, so the total can be defended rather than merely quoted." action_url=agents_url action_label="Talk to People Operations" %}
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- 2. The resume ------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-file-lines" aria-hidden="true"></i> Resume
+                    </h2>
+                    <p class="card__subtitle">
+                        {% if candidate.resume_source %}
+                            Extracted from {{ candidate.resume_source }}.
+                        {% else %}
+                            Source not recorded.
+                        {% endif %}
+                        This text is the only substantive input to the score above.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                {% if candidate.resume_text %}
+                <div class="scroll-panel scroll-panel--tall" tabindex="0"
+                     role="region" aria-label="Resume text">{{ candidate.resume_text }}</div>
+                {% else %}
+                <div class="alert alert--warning">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span>
+                        No resume text is stored, so any score above was computed from
+                        nothing. Treat it as unscored.
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 4. Interviews -------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-comments" aria-hidden="true"></i> Interview history
+                </h2>
+            </div>
+            <div class="card__body stack">
+                {% for interview in interviews %}
+                <article class="card">
+                    <div class="card__header">
+                        <div>
+                            <h3 class="card__title">
+                                {{ interview.round_name }}
+                                <span class="u-text-xs u-text-subtle">round {{ interview.round_number }}</span>
+                            </h3>
+                            <p class="card__subtitle">
+                                {{ interview.when_readable }}
+                                &middot; {{ interview.get_mode_display }}
+                                &middot; {{ interview.duration_minutes }} minutes
+                            </p>
+                        </div>
+                        {% include 'partials/_status_badge.html' with status=interview.status label=interview.get_status_display dot=True %}
+                    </div>
+                    <div class="card__body">
+                        {% if interview.interviewer_list %}
+                        <p class="factlist__key">Interviewers</p>
+                        <div class="chip-set u-mb-4">
+                            {% for name in interview.interviewer_list %}
+                            <span class="chip">{{ name }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if interview.questions %}
+                        <p class="factlist__key">Questions prepared</p>
+                        <ul class="criteria u-mb-4">
+                            {% for question in interview.questions %}
+                            <li>
+                                <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                                <span>
+                                    {% if question.text %}{{ question.text }}{% else %}{{ question }}{% endif %}
+                                    {% if question.probes %}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        Probe for: {{ question.probes }}
+                                    </span>
+                                    {% endif %}
+                                </span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+
+                        {% if interview.evaluation_form %}
+                        <p class="factlist__key">Evaluation form</p>
+                        <div class="chip-set u-mb-4">
+                            {% for criterion in interview.evaluation_form %}
+                            <span class="chip">
+                                {% if criterion.criterion %}{{ criterion.criterion }}{% else %}{{ criterion }}{% endif %}
+                                {% if criterion.scale %}&middot; {{ criterion.scale }}{% endif %}
+                            </span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if interview.feedback %}
+                        <p class="factlist__key">Feedback recorded</p>
+                        <p class="factlist__value">{{ interview.feedback }}</p>
+                        {% endif %}
+
+                        {% if interview.reschedule_reason %}
+                        <p class="u-text-xs u-text-subtle u-m-0">
+                            Rescheduled: {{ interview.reschedule_reason }}
+                        </p>
+                        {% endif %}
+                    </div>
+                    {% if can_manage %}
+                    <div class="card__footer">
+                        <label class="sr-only" for="candInterview{{ interview.pk }}">
+                            Change the status of {{ interview.round_name }}
+                        </label>
+                        <select class="form-select inline-select" id="candInterview{{ interview.pk }}"
+                                data-ops-url="{% url 'api_ops_update' %}"
+                                data-ops-model="interview"
+                                data-ops-id="{{ interview.pk }}"
+                                data-ops-field="status"
+                                data-ops-current="{{ interview.status }}">
+                            {% for value, label in interview.STATUS_CHOICES %}
+                            <option value="{{ value }}" {% if interview.status == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                </article>
+                {% empty %}
+                {% include 'partials/_empty_state.html' with icon="fa-calendar-xmark" title="No interviews yet" message="Ask People Operations to prepare an interview: it generates the questions from this opening's own requirements and an evaluation form to score the answers against." action_url=agents_url action_label="Talk to People Operations" %}
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- 5. Correspondence ---------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-envelope" aria-hidden="true"></i>
+                        Correspondence about this candidate
+                    </h2>
+                    <p class="card__subtitle">
+                        What has actually left the company, and what is written and waiting
+                        for a person. The distinction is the whole approval model.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if sent_messages or queued_actions %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Message</th>
+                                <th scope="col">Channel</th>
+                                <th scope="col">State</th>
+                                <th scope="col">When</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for action in queued_actions %}
+                            <tr>
+                                <td data-label="Message">
+                                    <a href="{% url 'action_detail' action.pk %}">
+                                        <i class="fa-solid {{ action.icon }}" aria-hidden="true"></i>
+                                        {{ action.title|truncatechars:70 }}
+                                    </a>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        prepared by {{ action.agent.name|default:"an AI employee" }}
+                                    </span>
+                                </td>
+                                <td data-label="Channel">{{ action.target_app }}</td>
+                                <td data-label="State">
+                                    {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                                </td>
+                                <td data-label="When">{{ action.created_at|date:"j M Y H:i" }}</td>
+                            </tr>
+                            {% endfor %}
+
+                            {% for message in sent_messages %}
+                            <tr>
+                                <td data-label="Message">
+                                    <span class="u-semibold">{{ message.subject|default:"No subject" }}</span>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        to {{ message.recipient|default:"an unrecorded address" }}
+                                    </span>
+                                </td>
+                                <td data-label="Channel">{{ message.get_channel_display }}</td>
+                                <td data-label="State">
+                                    {% include 'partials/_status_badge.html' with status=message.status label=message.get_status_display %}
+                                </td>
+                                <td data-label="When">{{ message.sent_at|date:"j M Y H:i" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing has been written to this candidate" message="Ask People Operations to draft an interview invitation or a decision. It writes the message and puts it in the approval queue; nothing reaches the candidate until somebody releases it." action_url=agents_url action_label="Talk to People Operations" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 6. Earlier screens -------------------------------------------- -->
+        {% if evaluations|length > 1 %}
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                        Earlier screening runs
+                    </h2>
+                    <p class="card__subtitle">
+                        Kept as they stood. If the opening's requirements were later sharpened,
+                        an earlier judgement is still readable against the set it was made under.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Screened</th>
+                                <th scope="col">Score</th>
+                                <th scope="col">Recommendation</th>
+                                <th scope="col">Requirements measured</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in evaluations %}
+                            {% if not forloop.first %}
+                            <tr>
+                                <td data-label="Screened">{{ row.created_at|date:"j M Y H:i" }}</td>
+                                <td data-label="Score">
+                                    <span class="score score--{{ row.band }}">
+                                        {{ row.score|floatformat:1 }}<span class="score__unit">/100</span>
+                                    </span>
+                                </td>
+                                <td data-label="Recommendation">{{ row.get_recommendation_display }}</td>
+                                <td data-label="Requirements measured">
+                                    {{ row.score_breakdown|length }}
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+
+    <!-- ============ Right: the person ============ -->
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <div class="u-flex u-items-center u-gap-3">
+                    <span class="avatar avatar--round" style="background: var(--color-primary);">
+                        {{ candidate.initials }}
+                    </span>
+                    <div>
+                        <h2 class="card__title u-m-0">{{ candidate.full_name }}</h2>
+                        <p class="card__subtitle u-m-0">{{ candidate.get_source_display }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Email</span>
+                        <span class="datalist__value">{{ candidate.email|default:"Not on file" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Phone</span>
+                        <span class="datalist__value">{{ candidate.phone|default:"Not on file" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Location</span>
+                        <span class="datalist__value">{{ candidate.location|default:"Not recorded" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Experience</span>
+                        <span class="datalist__value">{{ candidate.years_experience|floatformat:1 }} years</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Cached score</span>
+                        <span class="datalist__value">
+                            <span class="score score--{{ candidate.score_band }}">
+                                {{ candidate.score|floatformat:1 }}<span class="score__unit">/100</span>
+                            </span>
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Applied</span>
+                        <span class="datalist__value">{{ candidate.created_at|date:"j M Y" }}</span>
+                    </div>
+                    {% if candidate.linkedin_url %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">LinkedIn</span>
+                        <span class="datalist__value">
+                            <a href="{{ candidate.linkedin_url }}" rel="noopener noreferrer nofollow"
+                               target="_blank">Profile</a>
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if skills %}
+                <p class="factlist__key u-mt-6">Skills recorded</p>
+                <div class="chip-set">
+                    {% for skill in skills %}
+                    <span class="chip">{{ skill }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <p class="factlist__key u-mt-6">Stage</p>
+                <p class="u-m-0">
+                    <span id="candidateStatusLabel">
+                        {% include 'partials/_status_badge.html' with status=candidate.status label=candidate.get_status_display dot=True %}
+                    </span>
+                </p>
+
+                {% if can_manage %}
+                <div class="form-field u-mt-4">
+                    <label class="form-field__label" for="candidateStatusSelect">
+                        Move this candidate
+                    </label>
+                    <select class="form-select" id="candidateStatusSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="candidate"
+                            data-ops-id="{{ candidate.pk }}"
+                            data-ops-field="status"
+                            data-ops-current="{{ candidate.status }}"
+                            data-ops-display="#candidateStatusLabel">
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if candidate.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Moving somebody here changes the pipeline only. It sends nothing:
+                        a rejection is a message, and a message needs approving.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        {% if candidate.notes %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-note-sticky" aria-hidden="true"></i> Notes
+                </h2>
+            </div>
+            <div class="card__body">
+                <p class="factlist__value u-m-0">{{ candidate.notes }}</p>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

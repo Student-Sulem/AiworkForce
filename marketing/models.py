@@ -385,6 +385,17 @@ class MCPServer(models.Model):
         return self.is_enabled and self.connection_status == 'connected'
 
     @property
+    def is_live(self):
+        """Whether this server genuinely connects, or is only modelled.
+
+        Gmail reads and sends real mail; the other six reproduce what an MCP
+        handshake would conclude without opening a socket. Saying which is
+        which, on the page itself, is the honest way to present that.
+        """
+        from .mcp_client import is_live
+        return is_live(self.server_key)
+
+    @property
     def target_label(self):
         """What the connection actually points at, for display."""
         if self.transport == 'stdio':
@@ -431,15 +442,30 @@ class MCPTool(models.Model):
 class AIAgent(models.Model):
     """An AI employee.
 
-    Each employee has a persona, a system prompt sent verbatim to the language
-    model, an assigned LLM, and a set of MCP tools it is permitted to use.
+    Each employee has a job, a system prompt sent verbatim to the language
+    model, an assigned LLM, a set of registered tools it may call and the
+    connected applications those tools reach.
+
+    THE ROSTER
+    ----------
+    Six employees, identified by the function they perform rather than by a
+    first name. `agent_type` is the key everything else hangs off: the tool
+    registry decides what an employee may call by matching against it, the
+    orchestrator routes by it, and the capability catalogue is generated from
+    it. The job descriptions themselves live in marketing/workforce.py.
+
+    The four earlier marketing-only agents are mapped onto this roster by
+    migration 0013, so conversations recorded before the redesign still belong
+    to an employee.
     """
 
     AGENT_TYPE_CHOICES = [
-        ('content', 'Social Content Creator'),
-        ('lead_finder', 'Lead Finder Specialist'),
-        ('outreach', 'Outreach & Email Manager'),
-        ('analyst', 'Analytics & Strategy Officer'),
+        ('hr', 'HR & Recruitment'),
+        ('engineering_manager', 'Engineering Manager'),
+        ('developer', 'Developer'),
+        ('research', 'Research Specialist'),
+        ('marketing', 'Marketing Manager'),
+        ('support', 'Support Representative'),
     ]
 
     STATUS_CHOICES = [
@@ -1085,3 +1111,59 @@ class ApprovalAuditLog(models.Model):
     def __str__(self):
         who = self.actor.username if self.actor else 'system'
         return f"{who} {self.get_action_display()} approval #{self.approval_id}"
+
+
+# ===========================================================================
+# 6. THE REST OF THE SCHEMA
+#
+# The platform outgrew a single module. Everything below this line lives in a
+# sibling file and is imported here, at the bottom, for one reason: Django
+# discovers models by importing an app's `models` module, so a model defined
+# elsewhere is only registered if something in this file pulls it in.
+#
+#   models_platform    integrations, capabilities, tasks, delegation, the
+#                      proposed-action queue, execution records, memory,
+#                      the audit log and system settings
+#   models_knowledge   the company knowledge base and research output
+#   models_hr          recruitment, interviewing, employees, onboarding
+#   models_eng         projects, sprints, work items, developer artefacts
+#   models_support     customers, tickets, support reporting
+#   models_content     campaign briefs, content pieces, the calendar, email
+#
+# The import sits at the bottom rather than the top because each of those
+# modules imports names from THIS one -- AIAgent, Conversation, ChatMessage --
+# and at the top it would be a circular import. By the time execution reaches
+# here every class above is defined, so the cycle does not exist.
+#
+# The module path decides the app label: `marketing.models_hr` resolves to the
+# `marketing` app, so those models need no explicit Meta.app_label and their
+# migrations live in marketing/migrations like everything else.
+# ===========================================================================
+
+from . import models_platform  # noqa: E402,F401
+from . import models_knowledge  # noqa: E402,F401
+from . import models_hr  # noqa: E402,F401
+from . import models_eng  # noqa: E402,F401
+from . import models_support  # noqa: E402,F401
+from . import models_content  # noqa: E402,F401
+
+# Re-exported so `from .models import Candidate` keeps working from anywhere,
+# which is what the rest of the application already expects of this module.
+from .models_platform import (  # noqa: E402,F401
+    ActionAuditTrail, AgentCapability, AgentDelegation, AgentMemory, AgentTask,
+    AuditEvent, CalendarEvent, ExternalIssue, Integration, OrchestratorDecision,
+    OutboundMessage, ProposedAction, SystemSetting)
+from .models_knowledge import (  # noqa: E402,F401
+    DocumentChunk, KnowledgeDocument, KnowledgeSource, ResearchCitation,
+    ResearchReport)
+from .models_hr import (  # noqa: E402,F401
+    Candidate, CandidateEvaluation, Employee, HRAnnouncement, Interview,
+    JobOpening, OnboardingTask, PerformanceReview)
+from .models_eng import (  # noqa: E402,F401
+    CodeArtifact, CodeReview, Project, Sprint, SprintReport, WorkItem,
+    WorkItemComment)
+from .models_support import (  # noqa: E402,F401
+    Customer, SupportReport, SupportTicket, TicketMessage, TicketTag)
+from .models_content import (  # noqa: E402,F401
+    AudienceSegment, CampaignBrief, ContentCalendarEntry, ContentPiece,
+    MarketingEmail)

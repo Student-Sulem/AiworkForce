@@ -1,0 +1,469 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    THE APPROVAL QUEUE -- everything an AI employee wants to do that is
+    waiting on a person.
+    Rendered by marketing.views_actions.actions_view at the URL named
+    'actions'.
+
+    THE ONE QUESTION THIS PAGE ANSWERS
+    ----------------------------------
+    Every row is built to answer, without being opened: what will happen, to
+    whom, through what application, and how risky is it. That is why the risk
+    pill, the target application and the payload preview are all above the
+    fold of the row, and why an integration in demo mode says so before the
+    Approve button rather than after it.
+
+    STRUCTURE, top to bottom
+        1. KPI tiles                 the state of the queue in six figures
+        2. Overdue panel             what has been waiting too long
+        3. Status tabs               server-rendered links carrying ?status=
+        4. Filter toolbar            a GET form, so it works without JavaScript
+        5. Bulk bar                  appears when something is selected
+        6. The rows                  one .queue-row per action
+        7. Pagination                partials/_pagination.html, 25 per page
+
+    WHAT IS AND IS NOT JAVASCRIPT
+    Deciding is a fetch() POST rather than a form submission, because a
+    decision updates the row in place and the reviewer stays where they were
+    in a long queue. The filters are a real GET form and the tabs are real
+    links, so narrowing the queue never depends on JavaScript. This mirrors
+    approvals.html, which is the older text queue this page sits beside.
+{% endcomment %}
+
+{% block title %}Approval queue | AI Workforce{% endblock %}
+{% block body_class %}page-actions{% endblock %}
+{% block page_title %}Approval queue{% endblock %}
+{% block page_subtitle %}
+    Your AI employees prepare; you decide. Nothing here has happened yet.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'orchestrator' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-shuffle" aria-hidden="true"></i> Orchestrator
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-users-gear" aria-hidden="true"></i> AI Employees
+    </a>
+{% endblock %}
+
+{% block content %}
+
+{% if not pipeline_ready %}
+<div class="alert alert--warning" role="alert">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <span>
+        The approval pipeline is not available in this build, so the queue can
+        be read but no decision can be recorded yet. Nothing below has been
+        changed.
+    </span>
+</div>
+{% endif %}
+
+<!-- 1. The state of the queue, in six figures -->
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Pending" value=stats.pending icon="fa-clock" tone="warning" meta="waiting on a person" %}
+    {% include 'partials/_kpi_tile.html' with label="Approved today" value=stats.approved_today icon="fa-circle-check" tone="success" meta="decided in the last day" %}
+    {% include 'partials/_kpi_tile.html' with label="Executed live" value=stats.executed icon="fa-paper-plane" tone="primary" meta="really left the company" %}
+    {% include 'partials/_kpi_tile.html' with label="Simulated" value=stats.simulated icon="fa-flask" tone="info" meta="demo mode, nothing sent" %}
+    {% include 'partials/_kpi_tile.html' with label="Rejected" value=stats.rejected icon="fa-circle-xmark" tone="danger" meta="stopped by a reviewer" %}
+    {% include 'partials/_kpi_tile.html' with label="Median decision" value=stats.median_decision_hours icon="fa-hourglass-half" tone="neutral" meta="hours from proposal to decision" %}
+</div>
+
+<!-- 2. Overdue. A queue nobody looks at is the failure mode of an approval
+        workflow, so anything stale gets its own panel rather than sinking
+        quietly to the bottom of the list. -->
+{% if reminders %}
+<section class="card overdue-panel u-mb-6" aria-labelledby="overdueTitle">
+    <div class="card__header">
+        <h2 class="card__title" id="overdueTitle">
+            <i class="fa-solid fa-bell" aria-hidden="true"></i>
+            Waiting more than {{ overdue_hours }} hours
+        </h2>
+        <span class="badge badge--danger">{{ reminders|length }}</span>
+    </div>
+    <div class="card__body">
+        <p class="overdue-panel__note u-text-sm u-text-muted">
+            These were prepared by an employee and nobody has decided yet. Until
+            somebody does, the work is not done and nothing has been sent.
+        </p>
+        <ul class="overdue-list">
+            {% for item in reminders %}
+            <li class="overdue-list__item">
+                <span class="risk-pill risk-pill--{{ item.risk|default:'medium' }}">
+                    {{ item.risk|default:"medium"|title }}
+                </span>
+                <span class="u-grow u-truncate">
+                    {% if item.url %}<a href="{{ item.url }}">{{ item.title }}</a>
+                    {% else %}{{ item.title }}{% endif %}
+                    {% if item.agent %}
+                    <span class="u-text-xs u-text-subtle">&middot; {{ item.agent }}</span>
+                    {% endif %}
+                </span>
+                <span class="u-text-xs u-text-subtle">{{ item.age_hours }}h old</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</section>
+{% endif %}
+
+<!-- 3. Status tabs, rendered as links so filtering needs no JavaScript -->
+<nav class="tabs" aria-label="Filter by status">
+    {% for tab in status_tabs %}
+    <a href="?status={{ tab.value }}"
+       class="tabs__item {% if status_filter == tab.value %}is-active{% endif %}">
+        <i class="fa-solid {{ tab.icon }}" aria-hidden="true"></i> {{ tab.label }}
+        <span class="tabs__count">{{ tab.count }}</span>
+    </a>
+    {% endfor %}
+</nav>
+
+<!-- 4. The filters. A GET form, so every one of them is a bookmarkable URL
+        and every one survives pagination. -->
+<form class="toolbar" method="get" action="{% url 'actions' %}">
+    <input type="hidden" name="status" value="{{ status_filter }}">
+
+    <div class="toolbar__search">
+        <label class="sr-only" for="actionSearch">Search the queue</label>
+        <input class="form-input" id="actionSearch" type="search" name="q"
+               value="{{ search_query }}"
+               placeholder="Search titles, summaries and subjects">
+    </div>
+
+    <div class="toolbar__filters">
+        <label class="sr-only" for="actionRisk">Filter by risk</label>
+        <select class="form-select" id="actionRisk" name="risk">
+            <option value="all" {% if risk_filter == 'all' %}selected{% endif %}>Any risk</option>
+            {% for value, label in risk_choices %}
+            <option value="{{ value }}" {% if risk_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="actionAgent">Filter by employee</label>
+        <select class="form-select" id="actionAgent" name="agent">
+            <option value="all" {% if agent_filter == 'all' %}selected{% endif %}>Any employee</option>
+            {% for value, label in agent_choices %}
+            <option value="{{ value }}" {% if agent_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="actionApp">Filter by application</label>
+        <select class="form-select" id="actionApp" name="app">
+            <option value="all" {% if app_filter == 'all' %}selected{% endif %}>Any application</option>
+            {% for integration in integrations %}
+            <option value="{{ integration.provider_key }}"
+                    {% if app_filter == integration.provider_key %}selected{% endif %}>{{ integration.name }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="actionType">Filter by action type</label>
+        <select class="form-select" id="actionType" name="type">
+            <option value="all" {% if type_filter == 'all' %}selected{% endif %}>Any action</option>
+            {% for value in action_types %}
+            <option value="{{ value }}" {% if type_filter == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+        </select>
+
+        <button class="btn btn--secondary" type="submit">
+            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
+        </button>
+        {% if has_filters %}
+        <a class="btn btn--ghost" href="?status={{ status_filter }}">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+{% if actions %}
+
+    <!-- 5. Bulk selection. Announced with aria-live because the bar appears
+            without the page changing, which a screen reader would otherwise
+            never learn about. -->
+    {% if can_decide %}
+    <div class="card u-mb-4">
+        <div class="card__body u-flex u-items-center u-gap-3 u-wrap">
+            <label class="form-check-row" for="selectAllActions">
+                <input class="form-check" type="checkbox" id="selectAllActions">
+                Select all on this page
+            </label>
+            <div class="u-grow"></div>
+            <div class="u-flex u-gap-2 u-wrap" id="actionBulkBar"
+                 role="status" aria-live="polite" hidden>
+                <span class="badge badge--primary">
+                    <span id="actionBulkCount">0</span> selected
+                </span>
+                <button class="btn btn--success btn--sm" type="button"
+                        data-bulk-decision="approved"
+                        data-bulk-url="{% url 'api_action_bulk' %}">
+                    <i class="fa-solid fa-check" aria-hidden="true"></i> Approve selected
+                </button>
+                <button class="btn btn--outline-danger btn--sm" type="button"
+                        data-bulk-decision="rejected"
+                        data-bulk-url="{% url 'api_action_bulk' %}">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject selected
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 6. The rows -->
+    <div class="stack">
+        {% for action in actions %}
+        <article class="card queue-row {% if action.is_overdue %}queue-row--overdue{% endif %}"
+                 data-action-row="{{ action.pk }}">
+            <div class="card__body">
+
+                <div class="queue-row__head">
+                    {% if action.is_pending and can_decide %}
+                    <label class="sr-only" for="selectAction-{{ action.pk }}">
+                        Select "{{ action.title }}"
+                    </label>
+                    <input class="form-check queue-row__check" type="checkbox"
+                           id="selectAction-{{ action.pk }}" value="{{ action.pk }}"
+                           data-action-select>
+                    {% endif %}
+
+                    <span class="kpi__icon kpi__icon--{{ action.risk_tone }}">
+                        <i class="fa-solid {{ action.icon }}" aria-hidden="true"></i>
+                    </span>
+
+                    <div class="u-grow">
+                        <h2 class="card__title u-m-0">
+                            <a href="{% url 'action_detail' action.pk %}">{{ action.title }}</a>
+                        </h2>
+                        <p class="card__subtitle">
+                            proposed by
+                            {% if action.agent %}
+                                {{ action.agent.name }}
+                            {% else %}
+                                the system
+                            {% endif %}
+                            &middot; {{ action.created_at|timesince }} ago
+                            &middot; <code class="u-text-xs">{{ action.action_type }}</code>
+                        </p>
+                    </div>
+
+                    <div class="queue-row__flags">
+                        {# Risk first: it is the single most consequential fact
+                           about a row, and 'high' means somebody outside the
+                           company receives this. #}
+                        <span class="risk-pill risk-pill--{{ action.risk }}"
+                              title="{{ action.get_risk_display }}">
+                            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                            {{ action.risk|title }} risk
+                        </span>
+
+                        <span class="target-app">
+                            {% if action.integration %}
+                            <i class="fa-solid {{ action.integration.icon }}"
+                               style="color: {{ action.integration.color }};" aria-hidden="true"></i>
+                            {{ action.integration.name }}
+                            {% else %}
+                            <i class="fa-solid fa-user-gear" aria-hidden="true"></i>
+                            AI Workforce
+                            {% endif %}
+                        </span>
+
+                        {% if action.was_edited %}
+                        {# Approving an edited action is a different act from
+                           approving the employee's own words, so the row says
+                           which one this is. #}
+                        <span class="badge badge--info" data-edited-marker>
+                            <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                            Edited {{ action.edit_count }}&times;
+                        </span>
+                        {% endif %}
+
+                        {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display dot=True %}
+                    </div>
+                </div>
+
+                {% if action.mode_warning %}
+                <div class="demo-warning demo-warning--{{ action.mode_warning.tone }}" role="note">
+                    <i class="fa-solid {{ action.mode_warning.icon }}" aria-hidden="true"></i>
+                    <span><strong>{{ action.mode_warning.label }}.</strong>
+                          {{ action.mode_warning.message }}</span>
+                </div>
+                {% endif %}
+
+                <div class="queue-row__preview">
+                    <p class="queue-row__headline u-m-0">{{ action.preview.headline }}</p>
+                    {% if action.preview.detail %}
+                    <p class="queue-row__detail u-m-0">{{ action.preview.detail }}</p>
+                    {% endif %}
+                </div>
+
+                {% if action.subject_display %}
+                <p class="u-text-xs u-text-subtle u-mt-2 u-m-0">
+                    <i class="fa-solid fa-link" aria-hidden="true"></i>
+                    concerns {{ action.subject_display }}
+                </p>
+                {% endif %}
+
+                {% if action.decision_reason %}
+                <div class="alert alert--danger u-mt-4">
+                    <i class="fa-solid fa-comment" aria-hidden="true"></i>
+                    <span><strong>Reason given:</strong> {{ action.decision_reason }}</span>
+                </div>
+                {% endif %}
+
+                {% if action.execution_summary %}
+                <div class="alert alert--{% if action.status == 'failed' %}danger{% elif action.executed_in_demo %}info{% else %}success{% endif %} u-mt-4">
+                    <i class="fa-solid {% if action.status == 'failed' %}fa-circle-exclamation{% elif action.executed_in_demo %}fa-flask{% else %}fa-circle-check{% endif %}"
+                       aria-hidden="true"></i>
+                    <span>
+                        {% if action.executed_in_demo %}<strong>Simulated.</strong>{% endif %}
+                        {{ action.execution_summary }}
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="card__footer">
+                {% if action.is_pending and can_decide %}
+                <button class="btn btn--success btn--sm" type="button"
+                        data-decide="approved" data-action-id="{{ action.pk }}"
+                        data-risk="{{ action.risk }}"
+                        data-title="{{ action.title }}"
+                        data-demo="{% if action.mode_warning.tone == 'warning' %}1{% else %}0{% endif %}"
+                        data-url="{% url 'api_action_decide' %}"
+                        data-retry-url="{% url 'api_action_retry' %}">
+                    <i class="fa-solid fa-check" aria-hidden="true"></i> Approve
+                </button>
+                <button class="btn btn--outline-danger btn--sm" type="button"
+                        data-decide="rejected" data-action-id="{{ action.pk }}"
+                        data-title="{{ action.title }}"
+                        data-url="{% url 'api_action_decide' %}">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
+                </button>
+                {% elif action.is_pending %}
+                <span class="u-text-sm u-text-muted">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    Awaiting a Manager
+                </span>
+                {% elif action.status == 'failed' and can_decide %}
+                <button class="btn btn--secondary btn--sm" type="button"
+                        data-retry="{{ action.pk }}"
+                        data-url="{% url 'api_action_retry' %}">
+                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry
+                </button>
+                {% else %}
+                <span class="u-text-sm u-text-muted" data-decision-summary>
+                    {{ action.decision_summary }}
+                </span>
+                {% endif %}
+
+                <div class="u-grow"></div>
+                <a href="{% url 'action_detail' action.pk %}" class="btn btn--ghost btn--sm">
+                    Open <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+
+    <!-- 7. Pagination, carrying every filter through -->
+    {% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
+
+{% else %}
+    <div class="card">
+        {% if status_filter == 'pending' and not has_filters %}
+            {% comment %} the url tag cannot be nested inside an {% include ... with %}, so
+               the route is resolved into a variable first. {% endcomment %}
+            {% url 'orchestrator' as orchestrator_url %}
+            {% include 'partials/_empty_state.html' with icon="fa-clipboard-check" title="Nothing is waiting on you" message="Work arrives here when an AI employee prepares something that would leave the company: an email, a Slack message, a calendar invitation, a published post or a filed issue. Ask an employee for one of those, or describe what you need on the Orchestrator, and it will appear in this queue." action_url=orchestrator_url action_label="Open the Orchestrator" %}
+        {% else %}
+            {% include 'partials/_empty_state.html' with icon="fa-filter-circle-xmark" title="Nothing matches this filter" message="Widen the filters, or clear them to see the whole queue." %}
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}
+
+
+{% block modals %}
+{% comment %}
+    The rejection dialog. A reason is mandatory here and again in the
+    endpoint: a rejection with no explanation tells the employee nothing and
+    tells the next reviewer nothing either.
+{% endcomment %}
+<div class="modal" id="actionRejectModal" role="dialog" aria-modal="true"
+     aria-labelledby="actionRejectTitle" aria-hidden="true">
+    <div class="modal__box modal__box--sm">
+        <div class="modal__header">
+            <h2 class="modal__title" id="actionRejectTitle">
+                <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Reject action
+            </h2>
+            <button class="modal__close" type="button" data-modal-close
+                    aria-label="Close this dialog">&times;</button>
+        </div>
+
+        <div class="modal__body">
+            <p class="u-text-sm u-text-muted">
+                Rejecting <strong id="actionRejectSubject">this action</strong>.
+                It will not be carried out, and your reason is recorded in its
+                audit trail permanently.
+            </p>
+            <div class="form-field">
+                <label class="form-field__label" for="actionRejectReason">
+                    Reason <span class="form-field__required" aria-hidden="true">*</span>
+                </label>
+                <textarea class="form-textarea" id="actionRejectReason" rows="4" required
+                          placeholder="Say what is wrong with it, so the employee can do better next time"></textarea>
+                <p class="form-field__hint">Required. The endpoint refuses a blank reason.</p>
+            </div>
+        </div>
+
+        <div class="modal__footer">
+            <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+            <button class="btn btn--danger" type="button" id="actionRejectConfirm">
+                Reject this action
+            </button>
+        </div>
+    </div>
+</div>
+
+{% comment %}
+    High-risk confirmation. A one-click send to a customer is not a review, so
+    an action whose risk is 'high' asks once more and says who receives it.
+{% endcomment %}
+<div class="modal" id="actionConfirmModal" role="dialog" aria-modal="true"
+     aria-labelledby="actionConfirmTitle" aria-hidden="true">
+    <div class="modal__box modal__box--sm">
+        <div class="modal__header">
+            <h2 class="modal__title" id="actionConfirmTitle">
+                <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                Confirm a high-risk action
+            </h2>
+            <button class="modal__close" type="button" data-modal-close
+                    aria-label="Close this dialog">&times;</button>
+        </div>
+
+        <div class="modal__body">
+            <div class="alert alert--danger">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span id="actionConfirmMessage">
+                    This action reaches somebody outside the company.
+                </span>
+            </div>
+            <p class="u-text-sm u-text-muted u-m-0">
+                <strong id="actionConfirmSubject">This action</strong> will be
+                carried out as soon as you confirm. If you have not read the full
+                content, open it instead.
+            </p>
+        </div>
+
+        <div class="modal__footer">
+            <button class="btn btn--secondary" type="button" data-modal-close>Cancel</button>
+            <button class="btn btn--success" type="button" id="actionConfirmProceed">
+                <i class="fa-solid fa-check" aria-hidden="true"></i> Approve and execute
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/actions.js' %}" defer></script>
+{% endblock %}

@@ -1,0 +1,313 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one knowledge document.
+    Rendered by marketing.views_ops.document_detail_view at the URL named
+    'ops_document'.
+
+    STRUCTURE
+      1. the summary      what the document is about
+      2. the content      in a reading column, WITH the chunk boundaries visible
+      3. the rail         type, department, version, author, source, counts
+      4. citations        the research reports that quoted this document
+
+    WHY THE CHUNK BOUNDARIES ARE SHOWN
+    Search does not rank documents; it ranks passages. A reader who finds this
+    document returned for a query they thought was about something else can see
+    that the match was one indexed passage, with its own heading and its own
+    keywords -- which explains the result far better than the ranking ever
+    could. The boundaries are drawn as a quiet rule and an ordinal rather than
+    as a heavy divider, because the document still has to be readable as prose.
+
+    Where the document has no chunks the raw content is shown instead, with a
+    warning: an unchunked document is invisible to search, and that is worth
+    saying out loud rather than leaving the reader to wonder.
+{% endcomment %}
+
+{% block title %}{{ document.title }} | Knowledge base{% endblock %}
+{% block body_class %}page-ops page-ops-document{% endblock %}
+{% block page_title %}{{ document.title }}{% endblock %}
+{% block page_subtitle %}
+    {{ document.get_doc_type_display }}
+    {% if document.department %}&middot; {{ document.department }}{% endif %}
+    &middot; version {{ document.version }}
+    &middot; {{ document.word_count }} words in {{ chunks|length }} passage{{ chunks|length|pluralize }}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_knowledge' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Knowledge base
+    </a>
+    {% if document.url %}
+    <a href="{{ document.url }}" class="btn btn--secondary" target="_blank"
+       rel="noopener noreferrer">
+        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> Original
+    </a>
+    {% endif %}
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this document
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+{% if not document.is_active %}
+<div class="alert alert--warning u-mb-4">
+    <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>
+    <span>
+        This document is marked inactive, so search will not return it and no employee will
+        quote it.
+    </span>
+</div>
+{% endif %}
+
+<div class="detail-split">
+    <div class="stack">
+
+        <!-- 1. Summary ----------------------------------------------------- -->
+        {% if document.summary %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-align-left" aria-hidden="true"></i> Summary
+                </h2>
+            </div>
+            <div class="card__body">
+                <p class="factlist__value u-m-0">{{ document.summary }}</p>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- 2. The content, with the passage boundaries visible ------------ -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-file-lines" aria-hidden="true"></i> The document
+                    </h2>
+                    <p class="card__subtitle">
+                        Divided as it is indexed. Search ranks these passages, not the
+                        document, which is why a result points at one section of it.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                {% if chunks %}
+                <div class="prose">
+                    {% for chunk in chunks %}
+                    <section class="chunk" aria-label="Passage {{ chunk.ordinal|add:1 }}">
+                        <p class="chunk__marker u-m-0">
+                            <span class="chunk__ordinal">{{ chunk.ordinal|add:1 }}</span>
+                            {% if chunk.heading %}
+                            <span class="chunk__heading">{{ chunk.heading }}</span>
+                            {% else %}
+                            <span>passage</span>
+                            {% endif %}
+                            <span>&middot; {{ chunk.word_count }} words</span>
+                            {% if chunk.keywords %}
+                            <span>&middot; indexed on
+                                {% for word in chunk.keywords %}{{ word }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                            </span>
+                            {% endif %}
+                        </p>
+                        <p>{{ chunk.text }}</p>
+                    </section>
+                    {% endfor %}
+                </div>
+                {% elif document.content %}
+                <div class="alert alert--warning u-mb-4">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span>
+                        This document has no indexed passages, so search cannot return it and
+                        no employee can quote it. Re-index its source from the knowledge base
+                        page to build them.
+                    </span>
+                </div>
+                <div class="prose">
+                    <p>{{ document.content }}</p>
+                </div>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-file-circle-question" title="This document has no content" message="The record exists but holds no text. Ask Knowledge & Research to index the original, or paste the text in from the knowledge base page." action_url=agents_url action_label="Talk to Knowledge & Research" %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 4. Who cited it ------------------------------------------------ -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-quote-left" aria-hidden="true"></i>
+                        Research that cited this document
+                    </h2>
+                    <p class="card__subtitle">
+                        A document that has been quoted is a document somebody relied on, so
+                        a correction here has consequences worth tracing.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if citing_reports %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Report</th>
+                                <th scope="col">Question it answered</th>
+                                <th scope="col">Written by</th>
+                                <th scope="col">When</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for report in citing_reports %}
+                            <tr>
+                                <td data-label="Report">
+                                    <span class="u-semibold">{{ report.title }}</span>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ report.get_kind_display }}
+                                    </span>
+                                </td>
+                                <td data-label="Question it answered">
+                                    {{ report.question|truncatechars:90|default:"Not recorded" }}
+                                </td>
+                                <td data-label="Written by">
+                                    {{ report.agent.name|default:"Unknown" }}
+                                </td>
+                                <td data-label="When">{{ report.created_at|date:"j M Y" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-quote-left" title="Nothing has cited this yet" message="Ask Knowledge & Research a question this document answers. Its reports name the document behind every claim, and the citation appears here." action_url=agents_url action_label="Talk to Knowledge & Research" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        {% if citations %}
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-quote-right" aria-hidden="true"></i>
+                        The passages that were quoted
+                    </h2>
+                </div>
+            </div>
+            <div class="card__body stack">
+                {% for citation in citations %}
+                <div>
+                    <p class="factlist__key">
+                        {{ citation.source_label|default:document.title }}
+                        &middot; relevance {{ citation.relevance|floatformat:3 }}
+                    </p>
+                    {% if citation.quote %}
+                    <p class="hit__snippet">{{ citation.quote }}</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+    </div>
+
+    <!-- ============ Right: the record ============ -->
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i> The record
+                </h2>
+                <span class="badge badge--info">{{ document.get_doc_type_display }}</span>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Source</span>
+                        <span class="datalist__value">
+                            {% if document.source %}
+                                {{ document.source.name }}
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ document.source.get_kind_display }}
+                                </span>
+                            {% else %}
+                                Entered directly
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Department</span>
+                        <span class="datalist__value">{{ document.department|default:"Not set" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Version</span>
+                        <span class="datalist__value">{{ document.version }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Author</span>
+                        <span class="datalist__value">{{ document.author|default:"Not recorded" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Words</span>
+                        <span class="datalist__value">{{ document.word_count }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Indexed passages</span>
+                        <span class="datalist__value">{{ chunks|length }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Last indexed</span>
+                        <span class="datalist__value">
+                            {{ document.indexed_at|date:"j M Y H:i"|default:"Never" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Added</span>
+                        <span class="datalist__value">{{ document.created_at|date:"j M Y" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Added by</span>
+                        <span class="datalist__value">
+                            {{ document.created_by_agent.name|default:document.created_by.username|default:"Unknown" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Cite as</span>
+                        <span class="datalist__value">{{ document.citation_label }}</span>
+                    </div>
+                </div>
+
+                {% if tags %}
+                <p class="factlist__key u-mt-6">Tags</p>
+                <div class="chip-set">
+                    {% for tag in tags %}
+                    <span class="chip">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if document.external_id %}
+                <p class="u-text-xs u-text-subtle u-mt-6 u-mb-0">
+                    Known to its source system as
+                    <code>{{ document.external_id }}</code>. That identifier is what makes a
+                    renamed file the same document rather than a second copy of it.
+                </p>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

@@ -4,7 +4,11 @@ Run them with:
 
     python manage.py test marketing
 
-Twenty-two classes, grouped by what they prove:
+Twenty-five classes, grouped by what they prove. The roster moved from four
+marketing-only agents (content, lead_finder, outreach, analyst) to six AI
+employees identified by function (hr, engineering_manager, developer,
+research, marketing, support); most classes below were updated in place for
+that move rather than replaced, and WorkforceOSTests is new.
 
     WorkspaceRoutingTests      the six pages exist, are protected, and the two
                                deleted pages really are gone
@@ -32,8 +36,11 @@ Twenty-two classes, grouped by what they prove:
     EnvFileTests               credentials survive closing the terminal
     MailRouterTests            what a person types becomes a mailbox action
     MailboxToolGateTests       the MCP tool record is what grants access
-    MailboxChatTests           a mailbox turn, end to end, with no network
     SendNowTests               approve and send in one click, still audited
+    McpHandshakeTests          the page says which servers really connect
+    WorkforceOSTests           the six-employee redesign: the propose/approve/
+                               execute pipeline, redaction, routing and the
+                               knowledge base
 """
 
 import io
@@ -57,12 +64,16 @@ from django.utils import timezone
 
 from marketpulse import env as env_file
 
-from . import (agent_engine, gmail_client, llm_client, mail_agent,
-               mailer, markdown as md, roles)
+from . import (agent_engine, approvals, gmail_client, integrations, knowledge,
+               llm_client, mail_agent, mailer, markdown as md, mcp_client,
+               orchestrator, provisioning, roles, tools)
 from .forms import AIAgentForm, ApprovalDecisionForm
 from .models import (AIAgent, ApprovalAuditLog, ApprovalRequest, ChatMessage,
                      Conversation, EmailOutreach, Lead, LLMModel, LLMProvider,
-                     MCPCallLog, MCPServer, MCPTool, Profile, SocialPost)
+                     MCPServer, MCPTool, Profile, SocialPost)
+from .models_hr import HRAnnouncement
+from .models_platform import ProposedAction
+from .tools import base as tool_base
 
 PAGE_NAMES = ['dashboard', 'agents', 'approvals', 'users', 'configurations', 'mcp_tools']
 
@@ -122,8 +133,8 @@ class WorkspaceProvisioningTests(TestCase):
         self.user = User.objects.create_user('bob', 'bob@example.com', 'pw-bob-12345')
         agent_engine.ensure_workspace_for_user(self.user)
 
-    def test_four_ai_employees_are_created(self):
-        self.assertEqual(AIAgent.objects.count(), 4)
+    def test_six_ai_employees_are_created(self):
+        self.assertEqual(AIAgent.objects.count(), 6)
 
     def test_each_employee_has_a_system_prompt(self):
         for agent in AIAgent.objects.all():
@@ -161,7 +172,7 @@ class WorkspaceProvisioningTests(TestCase):
     def test_provisioning_is_idempotent(self):
         agent_engine.ensure_workspace_for_user(self.user)
         agent_engine.ensure_workspace_for_user(self.user)
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(LLMProvider.objects.count(), 3)
         self.assertEqual(MCPServer.objects.count(), 7)
 
@@ -175,7 +186,7 @@ class WorkspaceProvisioningTests(TestCase):
         # The workspace is shared, so signing up joins the existing one
         # rather than creating a private copy.
         self.assertTrue(User.objects.filter(username='carol').exists())
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(MCPServer.objects.count(), 7)
 
 
@@ -185,7 +196,7 @@ class ChatTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
         agent_engine.ensure_workspace_for_user(self.user)
-        self.agent = AIAgent.objects.get(user=self.user, agent_type='content')
+        self.agent = AIAgent.objects.get(user=self.user, agent_type='marketing')
         self.conversation = agent_engine.start_conversation(self.user, self.agent)
         self.client.force_login(self.user)
 
@@ -208,7 +219,16 @@ class ChatTests(TestCase):
         self.assertEqual(self.conversation.messages.count(), 2)
 
     def test_a_reply_is_produced_even_with_no_language_model(self):
-        """The employee has no llm_model assigned, so this is the template path."""
+        """With no llm_model assigned, this is the template/tool fallback path.
+
+        provisioning.default_model() happily hands a fresh employee a real,
+        reachable model when the machine running the suite has a working
+        credential in its .env -- so the "no model" state has to be forced
+        here rather than assumed, or this test silently exercises the live
+        path on any machine with a configured provider.
+        """
+        self.agent.llm_model = None
+        self.agent.save(update_fields=['llm_model'])
         self.assertFalse(self.agent.has_live_llm)
         _user_message, reply = agent_engine.send_message(self.conversation, 'Hello')
         self.assertEqual(reply.generation_source, 'fallback')
@@ -275,11 +295,11 @@ class ChatTests(TestCase):
         response = self.client.post(
             reverse('conversation', args=[self.conversation.pk]),
             {
-                'name': 'Sophia', 'role': 'Head of Content',
-                'agent_type': 'content', 'avatar_icon': 'fa-pen-nib',
+                'name': 'Marketing & Communications', 'role': 'Head of Content',
+                'agent_type': 'marketing', 'avatar_icon': 'fa-pen-nib',
                 'avatar_color': '#7c3aed',
                 'persona_description': 'Writes social content.',
-                'system_prompt': 'You are Sophia. Be concise.',
+                'system_prompt': 'You write concise, platform-native copy.',
                 'llm_model': model.pk, 'temperature': '0.4', 'max_tokens': '600',
                 'status': 'active', 'is_active': 'on',
                 'mcp_tools': [t.pk for t in tools],
@@ -298,7 +318,7 @@ class ChatToApprovalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
         agent_engine.ensure_workspace_for_user(self.user)
-        self.agent = AIAgent.objects.get(user=self.user, agent_type='content')
+        self.agent = AIAgent.objects.get(user=self.user, agent_type='marketing')
         self.conversation = agent_engine.start_conversation(self.user, self.agent)
         _user_message, self.reply = agent_engine.send_message(
             self.conversation, 'Draft a post about approvals.')
@@ -501,7 +521,7 @@ class LLMClientFallbackTests(TestCase):
     def test_a_chat_reply_still_arrives_with_no_network(self):
         """The employee has a live model assigned, but the network is down."""
         self._break_the_network()
-        agent = AIAgent.objects.get(user=self.user, agent_type='content')
+        agent = AIAgent.objects.get(user=self.user, agent_type='marketing')
         agent.llm_model = LLMModel.objects.filter(provider=self.provider).first()
         agent.save()
         self.assertTrue(agent.has_live_llm)
@@ -586,7 +606,7 @@ class ApiKeyResolutionTests(TestCase):
 
     def test_an_environment_key_makes_an_employee_live(self):
         """AIAgent.has_live_llm depends on is_configured, so the two must agree."""
-        agent = AIAgent.objects.get(user=self.user, agent_type='content')
+        agent = AIAgent.objects.get(user=self.user, agent_type='marketing')
         agent.llm_model = LLMModel.objects.filter(provider=self.nvidia).first()
         agent.save()
 
@@ -721,19 +741,19 @@ class SharedWorkspaceTests(TestCase):
 
     def test_two_accounts_share_one_set_of_employees(self):
         """The old design gave each account its own copy; migration 0006 merged them."""
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(LLMProvider.objects.count(), 3)
         self.assertEqual(MCPServer.objects.count(), 7)
 
     def test_provisioning_is_idempotent(self):
         agent_engine.ensure_workspace()
         agent_engine.ensure_workspace()
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(LLMProvider.objects.count(), 3)
         self.assertEqual(MCPServer.objects.count(), 7)
 
     def test_everyone_sees_the_same_approval_queue(self):
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         conversation = agent_engine.start_conversation(self.alice, agent)
         _user_msg, reply = agent_engine.send_message(conversation, 'Draft something.')
         agent_engine.submit_message_for_approval(
@@ -747,7 +767,7 @@ class SharedWorkspaceTests(TestCase):
 
     def test_conversations_remain_private(self):
         """Shared data, private chat: the one deliberate exception."""
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         alice_thread = agent_engine.start_conversation(self.alice, agent)
 
         self.client.force_login(self.bob)
@@ -756,7 +776,7 @@ class SharedWorkspaceTests(TestCase):
             404)
 
     def test_another_user_cannot_post_into_your_conversation(self):
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         alice_thread = agent_engine.start_conversation(self.alice, agent)
 
         self.client.force_login(self.bob)
@@ -870,7 +890,7 @@ class PermissionMatrixTests(TestCase):
     # --- approving --------------------------------------------------------
 
     def _pending_approval(self, owner):
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         conversation = agent_engine.start_conversation(owner, agent)
         _user_msg, reply = agent_engine.send_message(conversation, 'Draft a post.')
         return agent_engine.submit_message_for_approval(
@@ -1071,18 +1091,18 @@ class WorkforceCrudTests(TestCase):
     def test_adding_an_employee(self):
         response = self.client.post(reverse('agent_create'), {
             'name': 'Nova', 'role': 'Community Manager',
-            'agent_type': 'content', 'avatar_icon': 'fa-star',
+            'agent_type': 'marketing', 'avatar_icon': 'fa-star',
             'avatar_color': '#7c3aed',
             'persona_description': 'Looks after the community.',
             'system_prompt': '', 'temperature': '0.7', 'max_tokens': '800',
             'status': 'active', 'is_active': 'on',
         })
-        # agent_type is unique across the workspace, and 'content' is taken.
+        # agent_type is unique across the workspace, and 'marketing' is taken.
         self.assertEqual(response.status_code, 200)
         self.assertFalse(AIAgent.objects.filter(name='Nova').exists())
 
     def test_removing_an_employee(self):
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         self.client.post(reverse('agent_delete', args=[agent.pk]))
         self.assertFalse(AIAgent.objects.filter(pk=agent.pk).exists())
 
@@ -1140,7 +1160,7 @@ class ProvisioningRegressionTests(TestCase):
         # The failing case: everything already exists, owned by someone else.
         agent_engine.ensure_workspace(owner=newcomer)
 
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(LLMProvider.objects.count(), 3)
         self.assertEqual(MCPServer.objects.count(), 7)
 
@@ -1165,7 +1185,7 @@ class ProvisioningRegressionTests(TestCase):
         agent_engine.ensure_workspace_for_user(second)
         agent_engine.ensure_workspace_for_user(second)
 
-        self.assertEqual(AIAgent.objects.count(), 4)
+        self.assertEqual(AIAgent.objects.count(), 6)
         self.assertEqual(LLMProvider.objects.count(), 3)
         self.assertEqual(MCPServer.objects.count(), 7)
 
@@ -1305,7 +1325,7 @@ class MarkdownRenderingTests(TestCase):
         """
         user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
         agent_engine.ensure_workspace_for_user(user)
-        agent = AIAgent.objects.get(agent_type='content')
+        agent = AIAgent.objects.get(agent_type='marketing')
         conversation = agent_engine.start_conversation(user, agent)
         agent_engine.send_message(conversation, 'Draft a post.')
 
@@ -1401,7 +1421,7 @@ class EmailDeliveryTests(TestCase):
             email='marcus@sterlingtech.example', company='Sterling Tech',
             job_title='CRO', industry='SaaS', lead_score=90, score_tier='hot')
 
-        agent = AIAgent.objects.get(agent_type='outreach')
+        agent = AIAgent.objects.get(agent_type='hr')
         conversation = agent_engine.start_conversation(self.user, agent)
         _user_msg, self.reply = agent_engine.send_message(
             conversation, 'Write a first-touch email.')
@@ -1565,8 +1585,8 @@ class EmailDeliveryTests(TestCase):
 
     def test_an_email_can_be_addressed_to_a_typed_address(self):
         """REGRESSION: the dialog only offered existing prospects, so asking
-        Aria to write to an arbitrary address had no way through."""
-        agent = AIAgent.objects.get(agent_type='outreach')
+        an employee to write to an arbitrary address had no way through."""
+        agent = AIAgent.objects.get(agent_type='hr')
         conversation = agent_engine.start_conversation(self.user, agent)
         _user_msg, reply = agent_engine.send_message(
             conversation, 'send email to someone@example.com')
@@ -1589,7 +1609,7 @@ class EmailDeliveryTests(TestCase):
         self.assertEqual(self.approval.email_outreach.recipient_email, '')
 
     def test_an_email_with_neither_recipient_nor_prospect_is_refused(self):
-        agent = AIAgent.objects.get(agent_type='outreach')
+        agent = AIAgent.objects.get(agent_type='hr')
         conversation = agent_engine.start_conversation(self.user, agent)
         _user_msg, reply = agent_engine.send_message(conversation, 'Write something.')
         with self.assertRaises(ValueError):
@@ -1635,11 +1655,13 @@ class EmailDeliveryTests(TestCase):
 class AgentPromptTests(TestCase):
     """The employees must know what the platform can do.
 
-    REGRESSION: Aria repeatedly answered "I cannot send emails, I have no
-    access to email servers" and told the user to copy and paste into Gmail.
-    Nothing in her prompt mentioned the platform, so the underlying model fell
-    back to the disclaimer a general assistant gives -- while the platform was
-    in fact perfectly capable of sending.
+    REGRESSION: an early build had an employee answer "I cannot send emails, I
+    have no access to email servers" and tell the user to copy and paste into
+    Gmail. Nothing in its prompt mentioned the platform, so the underlying
+    model fell back to the disclaimer a general assistant gives -- while the
+    platform was in fact perfectly capable of sending, once a person approved
+    it. marketing/workforce.py fixes this with WORKFORCE_PREAMBLE, sent ahead
+    of every employee's own job description.
     """
 
     def setUp(self):
@@ -1653,40 +1675,61 @@ class AgentPromptTests(TestCase):
                 self.assertIn('Never say you are unable to send',
                               agent.system_prompt)
 
-    def test_aria_is_told_to_write_the_email_rather_than_decline(self):
-        aria = AIAgent.objects.get(agent_type='outreach')
-        self.assertIn('WHEN SOMEONE ASKS YOU TO SEND AN EMAIL, WRITE IT',
-                      aria.system_prompt)
-        self.assertIn('Subject:', aria.system_prompt)
+    def test_every_employee_is_told_to_use_its_tools_rather_than_decline(self):
+        for agent in AIAgent.objects.all():
+            with self.subTest(agent=agent.name):
+                self.assertIn('Use your tools', agent.system_prompt)
+                self.assertIn('Call the tool.', agent.system_prompt)
 
-    def test_the_offline_reply_is_a_ready_to_send_email(self):
-        """Even with no model, the draft must be usable rather than a lecture."""
-        aria = AIAgent.objects.get(agent_type='outreach')
-        self.assertFalse(aria.has_live_llm)
+    def test_hr_is_never_told_to_improvise_a_policy(self):
+        """The People Operations job description carries its own guardrail,
+        on top of the platform-wide preamble every employee gets."""
+        hr = AIAgent.objects.get(agent_type='hr')
+        self.assertIn('do not improvise a policy', hr.system_prompt)
 
-        conversation = agent_engine.start_conversation(self.user, aria)
+    def test_the_offline_reply_still_does_real_work(self):
+        """Even with no model, the reply is grounded in a genuine tool result,
+        never a lecture about being unable to help.
+
+        The "no model" state is forced explicitly: provisioning.default_model()
+        assigns a fresh employee whatever real, reachable model the machine
+        running the suite happens to have a credential for, so this cannot be
+        assumed on every machine.
+        """
+        hr = AIAgent.objects.get(agent_type='hr')
+        hr.llm_model = None
+        hr.save(update_fields=['llm_model'])
+        self.assertFalse(hr.has_live_llm)
+
+        conversation = agent_engine.start_conversation(self.user, hr)
         _user_msg, reply = agent_engine.send_message(
-            conversation, 'send email to someone@example.com')
+            conversation, 'What is our leave policy?')
 
-        self.assertTrue(reply.content.lstrip().lower().startswith('subject:'))
+        self.assertEqual(reply.generation_source, 'fallback')
+        self.assertTrue(reply.content.strip())
         for phrase in ['cannot send', 'unable to send', 'copy', 'paste']:
             self.assertNotIn(phrase, reply.content.lower())
 
     def test_refreshing_prompts_updates_an_existing_employee(self):
-        """ensure_agents uses get_or_create, so a wording fix needs this."""
-        aria = AIAgent.objects.get(agent_type='outreach')
-        aria.system_prompt = 'Stale wording from an older release.'
-        aria.save()
+        """ensure_agents uses get_or_create, so a wording fix needs this.
 
-        updated = agent_engine.refresh_system_prompts()
+        The refresh lives in marketing/provisioning.py now; agent_engine's own
+        refresh_system_prompts() still exists but walks the old four-agent
+        blueprint, which matches no real AIAgent row any more.
+        """
+        hr = AIAgent.objects.get(agent_type='hr')
+        hr.system_prompt = 'Stale wording from an older release.'
+        hr.save()
+
+        updated = provisioning.refresh_system_prompts()
         self.assertGreaterEqual(updated, 1)
 
-        aria.refresh_from_db()
-        self.assertIn('WHEN SOMEONE ASKS YOU TO SEND AN EMAIL', aria.system_prompt)
+        hr.refresh_from_db()
+        self.assertIn('RECRUITMENT.', hr.system_prompt)
 
     def test_refreshing_prompts_twice_changes_nothing(self):
-        agent_engine.refresh_system_prompts()
-        self.assertEqual(agent_engine.refresh_system_prompts(), 0)
+        provisioning.refresh_system_prompts()
+        self.assertEqual(provisioning.refresh_system_prompts(), 0)
 
 
 class EnvFileTests(TestCase):
@@ -1861,24 +1904,24 @@ class MailboxToolGateTests(TestCase):
         self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
         agent_engine.ensure_workspace_for_user(self.user)
         agent_engine.refresh_agent_tools()
-        self.aria = AIAgent.objects.get(agent_type='outreach')
+        self.hr = AIAgent.objects.get(agent_type='hr')
 
-    def test_aria_has_the_reading_tools(self):
-        attached = {tool.qualified_name for tool in self.aria.mcp_tools.all()}
+    def test_hr_has_the_reading_tools(self):
+        attached = {tool.qualified_name for tool in self.hr.mcp_tools.all()}
         for name in ['gmail.list_messages', 'gmail.search_messages',
                      'gmail.read_message', 'gmail.create_draft', 'gmail.send_email']:
             with self.subTest(tool=name):
                 self.assertIn(name, attached)
 
     def test_nothing_is_withheld_while_the_tools_are_attached(self):
-        self.assertEqual(mail_agent.withheld(self.aria, 'gmail.list_messages'), '')
+        self.assertEqual(mail_agent.withheld(self.hr, 'gmail.list_messages'), '')
 
     def test_disabling_the_server_withdraws_the_capability(self):
         server = MCPServer.objects.get(server_key='gmail')
         server.is_enabled = False
         server.save(update_fields=['is_enabled'])
 
-        reason = mail_agent.withheld(self.aria, 'gmail.list_messages')
+        reason = mail_agent.withheld(self.hr, 'gmail.list_messages')
         self.assertIn('switched off', reason)
 
     def test_disabling_one_tool_withdraws_only_that_one(self):
@@ -1886,12 +1929,12 @@ class MailboxToolGateTests(TestCase):
         tool.is_enabled = False
         tool.save(update_fields=['is_enabled'])
 
-        self.assertIn('disabled', mail_agent.withheld(self.aria, 'gmail.search_messages'))
-        self.assertEqual(mail_agent.withheld(self.aria, 'gmail.list_messages'), '')
+        self.assertIn('disabled', mail_agent.withheld(self.hr, 'gmail.search_messages'))
+        self.assertEqual(mail_agent.withheld(self.hr, 'gmail.list_messages'), '')
 
     def test_an_employee_without_the_tool_cannot_read_mail(self):
-        sophia = AIAgent.objects.get(agent_type='content')
-        self.assertIn('does not have', mail_agent.withheld(sophia, 'gmail.list_messages'))
+        marketing_agent = AIAgent.objects.get(agent_type='marketing')
+        self.assertIn('does not have', mail_agent.withheld(marketing_agent, 'gmail.list_messages'))
 
     def test_a_withheld_action_never_touches_the_mailbox(self):
         """The refusal must come before the network call, not after it."""
@@ -1900,7 +1943,7 @@ class MailboxToolGateTests(TestCase):
         server.save(update_fields=['is_enabled'])
 
         with mock.patch.object(gmail_client, 'list_messages') as reader:
-            result = mail_agent.run(self.aria, {'action': 'list'}, None)
+            result = mail_agent.run(self.hr, {'action': 'list'}, None)
 
         reader.assert_not_called()
         self.assertIn('switched off', result['facts'])
@@ -1908,153 +1951,52 @@ class MailboxToolGateTests(TestCase):
     def test_refreshing_tools_is_additive_and_idempotent(self):
         """A person may have detached a tool deliberately; a provisioning pass
         must add what is missing without undoing that."""
-        link = self.aria.tool_links.first()
+        link = self.hr.tool_links.first()
         link.delete()
 
         self.assertGreaterEqual(agent_engine.refresh_agent_tools(), 1)
         self.assertEqual(agent_engine.refresh_agent_tools(), 0)
 
 
-class MailboxChatTests(TestCase):
-    """A mailbox turn, end to end, with the network stubbed out."""
-
-    INBOX = {
-        'ok': True,
-        'count': 2,
-        'total': 2,
-        'message': '2 unread messages in INBOX; showing 2.',
-        'messages': [
-            {'uid': '101', 'sender': 'Google <no-reply@google.com>',
-             'sender_email': 'no-reply@google.com', 'to': '', 'subject': 'Security alert',
-             'message_id': '<a@x>', 'date': '2026-09-06T22:48:00+00:00',
-             'date_display': '06 Sep 2026 at 22:48', 'is_unread': True,
-             'snippet': 'App password created.', 'body': 'App password created.'},
-            {'uid': '100', 'sender': 'Indeed <no-reply@indeed.com>',
-             'sender_email': 'no-reply@indeed.com', 'to': '', 'subject': 'Jobs for you',
-             'message_id': '<b@x>', 'date': '2026-09-06T22:24:00+00:00',
-             'date_display': '06 Sep 2026 at 22:24', 'is_unread': True,
-             'snippet': 'Roles near you.', 'body': 'Roles near you.'},
-        ],
-    }
-
-    def setUp(self):
-        self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
-        agent_engine.ensure_workspace_for_user(self.user)
-        agent_engine.refresh_agent_tools()
-        self.aria = AIAgent.objects.get(agent_type='outreach')
-        self.conversation = agent_engine.start_conversation(self.user, self.aria)
-
-    def test_asking_for_mail_reads_the_mailbox_and_stores_the_result(self):
-        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
-            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
-
-        self.assertEqual(len(reply.mail_listing), 2)
-        self.assertEqual(reply.mail_listing[0]['subject'], 'Security alert')
-        self.assertIn('gmail.list_messages', reply.tools_consulted)
-
-    def test_the_mailbox_works_with_no_language_model(self):
-        """Every feature of this project works offline, the mailbox included."""
-        self.assertFalse(self.aria.has_live_llm)
-
-        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
-            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
-
-        self.assertEqual(reply.generation_source, 'fallback')
-        self.assertIn('2 unread', reply.content)
-        self.assertEqual(len(reply.mail_listing), 2)
-
-    def test_the_call_is_logged_against_the_mcp_tool(self):
-        before = MCPCallLog.objects.count()
-        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
-            agent_engine.send_message(self.conversation, 'any new mail?')
-
-        self.assertEqual(MCPCallLog.objects.count(), before + 1)
-        log = MCPCallLog.objects.latest('called_at')
-        self.assertEqual(log.tool.qualified_name, 'gmail.list_messages')
-        self.assertEqual(log.outcome, 'ok')
-
-    def test_an_ordinary_turn_logs_no_tool_calls(self):
-        """REGRESSION: every chat turn used to write one MCPCallLog row per
-        attached tool, so six invented calls buried the real ones."""
-        before = MCPCallLog.objects.count()
-        agent_engine.send_message(self.conversation, 'hello')
-        self.assertEqual(MCPCallLog.objects.count(), before)
-
-    def test_a_position_resolves_against_the_last_listing(self):
-        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
-            agent_engine.send_message(self.conversation, 'any new mail?')
-
-        opened = {'ok': True, 'messages': [self.INBOX['messages'][1]],
-                  'count': 1, 'mail': self.INBOX['messages'][1],
-                  'message': 'Opened it.'}
-        with mock.patch.object(gmail_client, 'get_message', return_value=opened) as reader:
-            _sent, reply = agent_engine.send_message(self.conversation, 'open 2')
-
-        # The second card in the listing, not the second message by uid.
-        reader.assert_called_once_with('100')
-        self.assertEqual(reply.metadata.get('opened'), '100')
-
-    def test_a_reference_with_no_listing_asks_rather_than_guessing(self):
-        _sent, reply = agent_engine.send_message(self.conversation, 'open 2')
-        self.assertIn('check your inbox', reply.content.lower())
-        self.assertEqual(reply.mail_listing, [])
-
-    def test_replying_to_a_message_knows_where_it_goes(self):
-        with mock.patch.object(gmail_client, 'list_messages', return_value=self.INBOX):
-            agent_engine.send_message(self.conversation, 'any new mail?')
-
-        opened = {'ok': True, 'messages': [self.INBOX['messages'][0]],
-                  'count': 1, 'mail': self.INBOX['messages'][0],
-                  'message': 'Opened it.'}
-        with mock.patch.object(gmail_client, 'get_message', return_value=opened):
-            _sent, reply = agent_engine.send_message(
-                self.conversation, 'reply to 1 saying thanks')
-
-        self.assertEqual(reply.draft_recipient, 'no-reply@google.com')
-
-    def test_naming_an_address_makes_the_reply_sendable(self):
-        _sent, reply = agent_engine.send_message(
-            self.conversation, 'send an email to sam@example.com about pricing')
-        self.assertEqual(reply.draft_recipient, 'sam@example.com')
-
-    def test_two_addresses_are_not_guessed_between(self):
-        """Guessing which of two addresses was meant is how mail reaches the
-        wrong person, so neither is used and the dialog is shown instead."""
-        _sent, reply = agent_engine.send_message(
-            self.conversation, 'email a@example.com and b@example.com about pricing')
-        self.assertEqual(reply.draft_recipient, '')
-
-    def test_ordinary_conversation_never_grows_a_send_button(self):
-        _sent, reply = agent_engine.send_message(self.conversation, 'hello there')
-        self.assertEqual(reply.draft_recipient, '')
-
-    def test_a_mailbox_failure_is_reported_not_raised(self):
-        broken = {'ok': False, 'messages': [], 'count': 0,
-                  'message': 'The mail server did not answer within 20 seconds.'}
-        with mock.patch.object(gmail_client, 'list_messages', return_value=broken):
-            _sent, reply = agent_engine.send_message(self.conversation, 'any new mail?')
-
-        self.assertIn('did not answer', reply.content)
-        self.assertEqual(reply.mail_listing, [])
-
-
 class SendNowTests(TestCase):
-    """Approve and send in one click, without losing the audit trail."""
+    """Approve and send in one click, without losing the audit trail.
+
+    REGRESSION-turned-DELETION NOTE: this class used to also cover a mailbox
+    chat feature (asking an employee "any new mail?" and getting a listing
+    read live from Gmail via mail_agent/gmail_client, with position references
+    such as "open 2", and an inferred recipient address that made a reply
+    sendable with no typing). None of that survives the redesign:
+    agent_engine.send_message() now always delegates to
+    agent_runtime.run_turn(), which drives the marketing/tools registry and
+    never calls mail_agent at all -- mail_agent and gmail_client are reachable
+    only from agent_engine._legacy_send_message(), which runs solely when
+    `from . import agent_runtime` raises ImportError, which it does not in
+    this codebase. The former MailboxChatTests class (and the address
+    inference this class relied on for one-click sending) has been removed
+    for that reason; MailboxToolGateTests survives because it exercises
+    mail_agent.withheld() and agent_engine.refresh_agent_tools() directly,
+    which are still real, callable functions independent of the chat path.
+
+    What remains genuinely true, and is what this class checks now: given a
+    known recipient address, approving and sending in one click still records
+    a complete ApprovalRequest, still requires both the submit and the
+    approve permission, and still cannot be replayed twice.
+    """
 
     def setUp(self):
         self.user = User.objects.create_user('owner', 'o@example.com', 'pw-owner-1234')
-        self.user.profile.role = 'owner'
+        self.user.profile.role = roles.ROLE_ADMIN
         self.user.profile.save()
         agent_engine.ensure_workspace_for_user(self.user)
 
-        self.aria = AIAgent.objects.get(agent_type='outreach')
-        self.conversation = agent_engine.start_conversation(self.user, self.aria)
+        self.hr = AIAgent.objects.get(agent_type='hr')
+        self.conversation = agent_engine.start_conversation(self.user, self.hr)
         _sent, self.reply = agent_engine.send_message(
-            self.conversation, 'send an email to sam@example.com about pricing')
+            self.conversation, 'Write a short note about the office move.')
         self.client.force_login(self.user)
 
     def _post(self, **overrides):
-        payload = {'message_id': self.reply.pk}
+        payload = {'message_id': self.reply.pk, 'recipient_email': 'sam@example.com'}
         payload.update(overrides)
         return self.client.post(reverse('api_send_now'), payload,
                                 content_type='application/json')
@@ -2105,9 +2047,9 @@ class SendNowTests(TestCase):
         analyst.profile.save()
 
         self.client.force_login(analyst)
-        conversation = agent_engine.start_conversation(analyst, self.aria)
+        conversation = agent_engine.start_conversation(analyst, self.hr)
         _sent, reply = agent_engine.send_message(
-            conversation, 'send an email to sam@example.com about pricing')
+            conversation, 'Write a short note about the office move.')
 
         response = self.client.post(
             reverse('api_send_now'), {'message_id': reply.pk},
@@ -2124,3 +2066,233 @@ class SendNowTests(TestCase):
         self.client.force_login(intruder)
         self.assertEqual(self._post().status_code, 404)
         self.assertEqual(len(mail.outbox), 0)
+
+
+class McpHandshakeTests(TestCase):
+    """The MCP page must not describe a working server as broken.
+
+    REGRESSION: once Gmail became real -- reading over IMAP and sending over
+    SMTP with credentials from .env -- its card still ran the simulation, which
+    only inspects the `auth_token` field. So the page reported "no credential
+    is stored, write operations are blocked" about the one server that was
+    demonstrably sending mail.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('alice', 'a@example.com', 'pw-alice-123')
+        agent_engine.ensure_workspace_for_user(self.user)
+        self.gmail = MCPServer.objects.get(server_key='gmail')
+        self.linkedin = MCPServer.objects.get(server_key='linkedin')
+
+    def _probe(self, read_ok, send_ok, configured=True):
+        read = {'ok': read_ok, 'total': 10, 'message': 'mailbox unreachable'}
+        send = {'ok': send_ok, 'message': 'authentication failed'}
+        return (mock.patch.object(gmail_client, 'is_configured', return_value=configured),
+                mock.patch.object(gmail_client, 'check_connection', return_value=read),
+                mock.patch.object(mailer, 'check_connection', return_value=send))
+
+    def test_gmail_is_live_and_the_others_are_modelled(self):
+        self.assertTrue(self.gmail.is_live)
+        for key in ['linkedin', 'instagram', 'spotify', 'database',
+                    'memory', 'sequential_thinking']:
+            with self.subTest(server=key):
+                self.assertFalse(MCPServer.objects.get(server_key=key).is_live)
+
+    def test_a_working_mailbox_reports_connected(self):
+        configured, read, send = self._probe(True, True)
+        with configured, read, send:
+            result = mcp_client.simulate_handshake(self.gmail)
+
+        self.assertEqual(result['connection_status'], 'connected')
+        self.assertTrue(result['is_live'])
+        self.assertIn('IMAP', result['message'])
+        self.assertNotIn('write operations are blocked', result['message'])
+
+    def test_an_empty_auth_token_no_longer_downgrades_gmail(self):
+        """The credential lives in .env, not in that field."""
+        self.assertEqual(self.gmail.auth_token, '')
+        configured, read, send = self._probe(True, True)
+        with configured, read, send:
+            mcp_client.simulate_handshake(self.gmail)
+
+        self.gmail.refresh_from_db()
+        self.assertEqual(self.gmail.connection_status, 'connected')
+
+    def test_a_mailbox_that_cannot_send_is_degraded_not_connected(self):
+        configured, read, send = self._probe(True, False)
+        with configured, read, send:
+            result = mcp_client.simulate_handshake(self.gmail)
+
+        self.assertEqual(result['connection_status'], 'degraded')
+        self.assertIn('sending failed', result['message'])
+
+    def test_an_unreachable_mailbox_reports_failed(self):
+        configured, read, send = self._probe(False, False)
+        with configured, read, send:
+            result = mcp_client.simulate_handshake(self.gmail)
+
+        self.assertEqual(result['connection_status'], 'failed')
+
+    def test_no_credentials_at_all_says_so_plainly(self):
+        configured, read, send = self._probe(True, True, configured=False)
+        with configured, read, send:
+            result = mcp_client.simulate_handshake(self.gmail)
+
+        self.assertEqual(result['connection_status'], 'degraded')
+        self.assertIn('.env', result['message'])
+
+    def test_a_disabled_gmail_never_opens_a_connection(self):
+        """Switching a server off must stop it dialling out, not merely
+        relabel it afterwards."""
+        self.gmail.is_enabled = False
+        self.gmail.save(update_fields=['is_enabled'])
+
+        with mock.patch.object(gmail_client, 'check_connection') as probe:
+            result = mcp_client.simulate_handshake(self.gmail)
+
+        probe.assert_not_called()
+        self.assertEqual(result['connection_status'], 'disabled')
+
+    def test_a_modelled_server_still_opens_no_socket(self):
+        """LinkedIn is honestly reported as degraded: it is a simulation with
+        no credential, and nothing about it pretends otherwise."""
+        with mock.patch.object(gmail_client, 'check_connection') as probe:
+            result = mcp_client.simulate_handshake(self.linkedin)
+
+        probe.assert_not_called()
+        self.assertFalse(result['is_live'])
+        self.assertEqual(result['connection_status'], 'degraded')
+
+    def test_the_page_labels_which_servers_are_real(self):
+        self.client.force_login(self.user)
+        configured, read, send = self._probe(True, True)
+        with configured, read, send:
+            response = self.client.get(reverse('mcp_tools'))
+
+        html = response.content.decode()
+        self.assertIn('chip--live', html)
+        self.assertIn('Simulated', html)
+
+
+class WorkforceOSTests(TestCase):
+    """The six-employee redesign's own invariants.
+
+    Where the classes above were updated in place to keep testing the same
+    behaviour under new names, this class protects what is genuinely new in
+    the AI Workforce OS redesign: a fixed roster of six employees identified
+    by function rather than by first name, the propose/approve/execute
+    pipeline every tool with a real external effect goes through, credential
+    redaction in the audit trail, subject-based routing between employees, and
+    the knowledge base every employee is instructed to ground its answers in.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('priya', 'priya@example.com', 'pw-priya-1234')
+        self.user.profile.role = roles.ROLE_ADMIN
+        self.user.profile.save()
+        agent_engine.ensure_workspace_for_user(self.user)
+        self.hr = AIAgent.objects.get(agent_type='hr')
+
+    # --- provisioning -------------------------------------------------------
+
+    def test_six_employees_are_provisioned_with_the_right_types(self):
+        found = set(AIAgent.objects.values_list('agent_type', flat=True))
+        self.assertSetEqual(found, {'hr', 'engineering_manager', 'developer',
+                                    'research', 'marketing', 'support'})
+
+    def test_provisioning_the_six_employees_is_idempotent(self):
+        provisioning.ensure_workspace(owner=self.user)
+        provisioning.ensure_workspace(owner=self.user)
+        self.assertEqual(AIAgent.objects.count(), 6)
+
+    # --- the approval gate: tools.run on a tool that requires approval ------
+
+    def _propose_announcement(self):
+        ctx = tools.ToolContext(user=self.user, agent=self.hr)
+        return tools.run('hr.send_hr_announcement', ctx, {
+            'title': 'Office closed Friday',
+            'body': 'The office is closed for a public holiday.',
+            'channel': 'slack',
+        })
+
+    def test_an_approval_gated_tool_only_queues_an_action(self):
+        """The proposing function has no way to act; only a pending
+        ProposedAction comes out of it, and nothing is published yet."""
+        result = self._propose_announcement()
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.awaiting_approval)
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+        self.assertEqual(action.status, 'pending')
+        self.assertEqual(HRAnnouncement.objects.count(), 0)
+
+    def test_editing_a_pending_action_leaves_it_pending(self):
+        result = self._propose_announcement()
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+
+        outcome = approvals.edit(action, self.user, {'title': 'Office closed Monday'})
+
+        self.assertTrue(outcome['ok'])
+        action.refresh_from_db()
+        self.assertEqual(action.status, 'pending')
+        self.assertEqual(action.edit_count, 1)
+        self.assertEqual(action.payload['title'], 'Office closed Monday')
+
+    def test_approving_executes_and_is_marked_simulated_under_testing(self):
+        """settings.TESTING forces every connector to simulate, so an approved
+        action still runs -- it just cannot reach a real Slack workspace."""
+        result = self._propose_announcement()
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+
+        outcome = approvals.approve(action, self.user)
+
+        self.assertTrue(outcome['ok'])
+        action.refresh_from_db()
+        self.assertEqual(action.status, 'executed')
+        self.assertTrue(action.executed_in_demo)
+        self.assertEqual(HRAnnouncement.objects.count(), 1)
+
+    # --- redaction ----------------------------------------------------------
+
+    def test_redact_masks_a_credential_but_leaves_an_ordinary_key_alone(self):
+        cleaned = tool_base.redact({'bot_token': 'xoxb-a-real-secret',
+                                    'provider_key': 'slack'})
+        self.assertNotIn('xoxb-a-real-secret', str(cleaned['bot_token']))
+        self.assertEqual(cleaned['provider_key'], 'slack')
+
+    # --- routing --------------------------------------------------------------
+
+    def test_a_policy_question_is_routed_to_research(self):
+        decision = orchestrator.route('What is our refund policy', user=self.user)
+        self.assertEqual(decision['agent_type'], 'research')
+
+    # --- the knowledge base ---------------------------------------------------
+
+    def test_the_seed_knowledge_base_answers_a_refund_question(self):
+        knowledge.ensure_seed_documents(owner=self.user)
+        hits = knowledge.search('refund window')
+        self.assertGreater(len(hits), 0)
+        self.assertIn('Refund', hits[0].document.title)
+
+    # --- permissions on the proposed-action queue ---------------------------
+
+    def test_a_viewer_may_read_the_queue_but_not_decide_an_action(self):
+        viewer = User.objects.create_user('vv', 'v@example.com', 'pw-viewer-1234')
+        viewer.profile.role = roles.ROLE_VIEWER
+        viewer.profile.save()
+        self.client.force_login(viewer)
+
+        decide = self.client.post(
+            reverse('api_action_decide'),
+            json.dumps({'action_id': 1, 'decision': 'approved'}),
+            content_type='application/json')
+        self.assertEqual(decide.status_code, 403)
+
+        listing = self.client.get(reverse('actions'))
+        self.assertEqual(listing.status_code, 200)
+
+    # --- integrations always simulate while the test suite runs -------------
+
+    def test_a_slack_call_is_simulated_under_testing(self):
+        result = integrations.call('slack', 'post_message', channel='#x', text='hi')
+        self.assertTrue(result.demo)

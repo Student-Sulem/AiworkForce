@@ -1,0 +1,441 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    One AI employee, in full.
+    Rendered by marketing.views_ops.employee_profile_view at the URL named
+    'employee_profile', which takes the agent_type.
+
+    STRUCTURE
+      1. identity          name, role, description, the model it thinks with
+      2. capabilities      generated from the tool registry, grouped by heading,
+                           each marked when it needs approval and with the
+                           application it reaches
+      3. applications      the integrations its tools use, with each one's
+                           effective mode -- live or simulated
+      4. what it has done  tasks with their working record, proposed actions,
+                           memories, delegations in both directions, chats
+      5. its instructions  the system prompt, collapsed
+
+    WHY THIS PAGE IS GENERATED RATHER THAN WRITTEN
+    The capability list comes from the registered tools, so an employee cannot
+    advertise something the platform cannot do and cannot hide something it
+    can. The same is true of the applications panel: it lists what the tools
+    actually reach, with the mode each one is really in, because "can this
+    employee send that email" deserves a truthful answer and the truthful
+    answer is sometimes "it will simulate it".
+{% endcomment %}
+
+{% block title %}{{ employee_name }} | AI Workforce{% endblock %}
+{% block body_class %}page-ops page-employee-profile{% endblock %}
+{% block page_title %}{{ employee_name }}{% endblock %}
+{% block page_subtitle %}
+    {{ role_label }}. {{ capability_count }} capabilities, {{ approval_count }} of which
+    stop for a person before anything leaves the company.
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Start a conversation
+    </a>
+    {% if can_view_actions %}
+    <a href="{% url 'actions' %}?agent={{ agent.pk }}" class="btn btn--secondary">
+        <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Its approvals
+    </a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# 1. Identity ------------------------------------------------------------ #}
+<section class="card u-mb-6">
+    <div class="card__body">
+        <div class="roster__head" style="align-items:flex-start;">
+            <span class="avatar avatar--lg" style="background: {{ agent.avatar_color|default:'#4f46e5' }};">
+                <i class="fa-solid {{ agent.avatar_icon|default:'fa-robot' }}" aria-hidden="true"></i>
+            </span>
+            <div class="u-grow" style="min-width:0;">
+                <p class="u-mt-0 u-mb-3" style="line-height:var(--lh-relaxed);">
+                    {{ agent.persona_description|default:blueprint.persona_description }}
+                </p>
+                <dl class="detail-grid">
+                    <div>
+                        <dt>Identified as</dt>
+                        <dd>{{ employee_name }} <span class="u-text-subtle">({{ agent_type }})</span></dd>
+                    </div>
+                    <div>
+                        <dt>Language model</dt>
+                        <dd>
+                            {% if agent.has_live_llm %}
+                                <span class="mode-pill mode-pill--live">
+                                    <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+                                    {{ agent.llm_model.model_id }}
+                                </span>
+                            {% elif agent.llm_model %}
+                                <span class="mode-pill mode-pill--unavailable">
+                                    <i class="fa-solid fa-plug-circle-xmark" aria-hidden="true"></i>
+                                    {{ agent.llm_model.model_id }} -- provider not reachable
+                                </span>
+                            {% else %}
+                                <span class="mode-pill mode-pill--demo">
+                                    <i class="fa-solid fa-wrench" aria-hidden="true"></i>
+                                    No model assigned
+                                </span>
+                            {% endif %}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>Status</dt>
+                        <dd>{{ agent.get_status_display|default:'Active' }}</dd>
+                    </div>
+                    <div>
+                        <dt>Tasks completed</dt>
+                        <dd>{{ agent.tasks_completed|default:0 }}</dd>
+                    </div>
+                </dl>
+                {% if not agent.has_live_llm %}
+                <div class="notice-panel notice-panel--warning u-mt-4 u-mb-0">
+                    <span class="notice-panel__icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></span>
+                    <span>
+                        <strong>Without a reachable language model this employee still works.</strong>
+                        It picks the tool that best matches a request and answers from the real
+                        result, so records are still created and lookups still cited. What it cannot
+                        do is write prose. Connect a provider on the
+                        <a href="{% url 'configurations' %}">Language models</a> page.
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="grid grid-2 u-mb-6">
+
+    {# 2. Capabilities -------------------------------------------------- #}
+    <section class="card" style="grid-column: 1 / -1;">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-toolbox" aria-hidden="true"></i> Capabilities
+            </h2>
+            <span class="u-text-xs u-text-subtle">
+                {{ capability_count }} generated from the tool registry
+                &middot; <span class="mode-pill mode-pill--demo"><i class="fa-solid fa-user-check" aria-hidden="true"></i> approval</span> marks the ones that wait for a person
+            </span>
+        </div>
+        <div class="card__body">
+            {% if groups %}
+            <div class="capability-grid">
+                {% for group in groups %}
+                <section class="capability-group">
+                    <h3 class="capability-group__heading">
+                        {{ group.heading }}
+                        <span class="board__count">{{ group.entries|length }}</span>
+                    </h3>
+                    <ul class="capability-list">
+                        {% for entry in group.entries %}
+                        <li class="capability" title="{{ entry.tool_name }}">
+                            <span class="capability__icon" aria-hidden="true">
+                                <i class="fa-solid {{ entry.icon|default:'fa-bolt' }}"></i>
+                            </span>
+                            <span class="capability__text">
+                                <span class="capability__name">{{ entry.name }}</span>
+                                <span class="capability__desc">{{ entry.description|truncatechars:160 }}</span>
+                                <span class="capability__meta">
+                                    <code class="u-text-xs">{{ entry.tool_name }}</code>
+                                    {% if entry.integration_key %}
+                                        &middot; via {{ entry.integration_key }}
+                                    {% endif %}
+                                    {% if entry.reads_only %}&middot; read only{% endif %}
+                                </span>
+                            </span>
+                            {% if entry.requires_approval %}
+                            <span class="mode-pill mode-pill--demo" title="Queued for a person before it happens">
+                                <i class="fa-solid fa-user-check" aria-hidden="true"></i> approval
+                            </span>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% endfor %}
+            </div>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-toolbox" title="No capabilities registered" message="Run manage.py sync_workforce to regenerate the catalogue from the tool registry." %}
+            {% endif %}
+        </div>
+    </section>
+
+    {# 3. Connected applications ----------------------------------------- #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-plug-circle-check" aria-hidden="true"></i> Applications it reaches
+            </h2>
+            <a href="{% url 'integrations' %}" class="btn btn--ghost btn--sm">Configure</a>
+        </div>
+        <div class="card__body">
+            {% if integrations %}
+            <ul class="integration-strip">
+                {% for row in integrations %}
+                <li>
+                    <a href="{% url 'integration_detail' row.provider_key %}" class="integration-strip__item"
+                       title="{{ row.name }}: {{ row.effective_mode }}">
+                        <span class="integration-strip__icon" style="color: {{ row.color }};">
+                            <i class="fa-solid {{ row.icon }}" aria-hidden="true"></i>
+                        </span>
+                        <span class="integration-strip__name u-truncate">{{ row.name }}</span>
+                        <span class="mode-pill mode-pill--{{ row.effective_mode }}">{{ row.effective_mode }}</span>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="u-text-xs u-text-subtle u-mt-3 u-mb-0">
+                An application shown as <em>demo</em> is not broken. Its actions are simulated
+                and labelled as simulated wherever they appear, so the whole workflow can be
+                demonstrated before any credential exists.
+            </p>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-plug" title="No applications" message="This employee's tools reach no connected application." %}
+            {% endif %}
+            {% if unknown_integrations %}
+            <p class="u-text-xs u-text-subtle u-mt-2 u-mb-0">
+                Referenced but not registered: {{ unknown_integrations|join:', ' }}.
+            </p>
+            {% endif %}
+        </div>
+    </section>
+
+    {# 4a. Memory ----------------------------------------------------------- #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-brain" aria-hidden="true"></i> What it remembers
+            </h2>
+            <span class="u-text-xs u-text-subtle">{{ memories|length }} entries</span>
+        </div>
+        <div class="card__body">
+            {% if memories %}
+            <ul class="stack stack--tight">
+                {% for memory in memories %}
+                <li class="memory-row">
+                    <span class="chip {% if memory.scope == 'shared' %}chip--accent{% endif %}">
+                        {{ memory.get_kind_display }}{% if memory.scope == 'shared' %} &middot; shared{% endif %}
+                    </span>
+                    <span class="u-grow" style="min-width:0;">
+                        <span class="u-semibold" style="display:block;">{{ memory.key }}</span>
+                        <span class="u-text-sm u-text-muted" style="display:block;">{{ memory.content|truncatechars:220 }}</span>
+                    </span>
+                    <span class="u-text-xs u-text-subtle" title="Importance">{{ memory.importance }}/10</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-brain" title="Nothing remembered yet" message="An employee writes a memory when it learns something worth carrying into a later conversation." %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<div class="grid grid-2 u-mb-6">
+
+    {# 4b. Tasks ------------------------------------------------------------ #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-list-check" aria-hidden="true"></i> Recent tasks
+            </h2>
+        </div>
+        <div class="card__body">
+            {% if tasks %}
+            <ul class="stack stack--tight">
+                {% for task in tasks %}
+                <li>
+                    <details class="task-row">
+                        <summary class="action-row">
+                            <span class="u-grow" style="min-width:0;">
+                                <span class="action-row__title u-truncate">{{ task.title }}</span>
+                                <span class="action-row__meta">
+                                    {{ task.get_origin_display }} &middot; {{ task.tool_calls }} tool call{{ task.tool_calls|pluralize }}
+                                    &middot; {{ task.created_at|timesince }} ago
+                                </span>
+                            </span>
+                            {% include 'partials/_status_badge.html' with status=task.status label=task.get_status_display %}
+                        </summary>
+                        {% if task.steps %}
+                        <ol class="timeline u-mt-3">
+                            {% for step in task.steps %}
+                            <li class="timeline__item timeline__item--{{ step.outcome }}">
+                                <span class="timeline__title">{{ step.label }}</span>
+                                {% if step.detail %}<span class="u-text-sm u-text-muted" style="display:block;">{{ step.detail|truncatechars:240 }}</span>{% endif %}
+                                <span class="timeline__meta">{{ step.at }}</span>
+                            </li>
+                            {% endfor %}
+                        </ol>
+                        {% endif %}
+                        {% if task.result_summary %}
+                        <p class="u-text-sm u-text-muted u-mb-0">{{ task.result_summary|truncatechars:400 }}</p>
+                        {% endif %}
+                    </details>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-list-check" title="No tasks yet" message="Every chat turn and every delegated request becomes a task with a working record." %}
+            {% endif %}
+        </div>
+    </section>
+
+    {# 4c. Proposed actions --------------------------------------------------- #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Actions it proposed
+            </h2>
+            {% if can_view_actions %}<a href="{% url 'actions' %}" class="btn btn--ghost btn--sm">Queue</a>{% endif %}
+        </div>
+        <div class="card__body">
+            {% if actions %}
+            <ul class="stack stack--tight">
+                {% for action in actions %}
+                <li>
+                    {% if can_view_actions %}<a href="{% url 'action_detail' action.pk %}" class="action-row">{% else %}<div class="action-row">{% endif %}
+                        <span class="action-row__icon" aria-hidden="true"><i class="fa-solid {{ action.icon }}"></i></span>
+                        <span class="u-grow" style="min-width:0;">
+                            <span class="action-row__title u-truncate">{{ action.title }}</span>
+                            <span class="action-row__meta">
+                                {{ action.target_app }} &middot; {{ action.get_risk_display }}
+                                {% if action.executed_in_demo %}&middot; simulated{% endif %}
+                                {% if action.was_edited %}&middot; edited by a reviewer{% endif %}
+                            </span>
+                        </span>
+                        {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                    {% if can_view_actions %}</a>{% else %}</div>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing proposed yet" message="Ask it for something that leaves the company and the proposal will appear here." %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<div class="grid grid-2 u-mb-6">
+
+    {# 4d. Delegations ------------------------------------------------------- #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-people-arrows" aria-hidden="true"></i> Working with colleagues
+            </h2>
+        </div>
+        <div class="card__body">
+            {% if delegations_made or delegations_received %}
+                {% if delegations_made %}
+                <div class="subhead"><span class="subhead__title" style="font-size:var(--fs-base);">Asked a colleague</span></div>
+                <ul class="stack stack--tight">
+                    {% for row in delegations_made %}
+                    <li class="delegation">
+                        <span class="delegation__who">to {{ row.to_agent.name }}</span>
+                        <span class="delegation__text">{{ row.request|truncatechars:160 }}</span>
+                        {% include 'partials/_status_badge.html' with status=row.status label=row.get_status_display %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if delegations_received %}
+                <div class="subhead"><span class="subhead__title" style="font-size:var(--fs-base);">Asked by a colleague</span></div>
+                <ul class="stack stack--tight">
+                    {% for row in delegations_received %}
+                    <li class="delegation">
+                        <span class="delegation__who">from {{ row.from_agent.name }}</span>
+                        <span class="delegation__text">{{ row.request|truncatechars:160 }}</span>
+                        {% include 'partials/_status_badge.html' with status=row.status label=row.get_status_display %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-people-arrows" title="No delegations yet" message="Employees ask each other for help rather than guessing: Marketing asks Research for product facts, Support asks Research for a policy." %}
+            {% endif %}
+        </div>
+    </section>
+
+    {# 4e. Conversations ------------------------------------------------------ #}
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-comments" aria-hidden="true"></i> Your conversations with it
+            </h2>
+            <a href="{% url 'agents' %}" class="btn btn--ghost btn--sm">Open chat</a>
+        </div>
+        <div class="card__body">
+            {% if conversations %}
+            <ul class="stack stack--tight">
+                {% for conversation in conversations %}
+                <li>
+                    <a href="{% url 'conversation' conversation.pk %}" class="action-row">
+                        <span class="action-row__icon" aria-hidden="true"><i class="fa-solid fa-message"></i></span>
+                        <span class="u-grow" style="min-width:0;">
+                            <span class="action-row__title u-truncate">{{ conversation.title }}</span>
+                            <span class="action-row__meta">{{ conversation.updated_at|timesince }} ago</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right u-text-subtle" aria-hidden="true"></i>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-comments" title="No conversations yet" message="Start one from the AI Employees page. Only your own threads are listed here." %}
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+{# 5. Instructions ---------------------------------------------------------- #}
+<section class="card">
+    <div class="card__body">
+        <details>
+            <summary class="u-semibold" style="cursor:pointer;">
+                <i class="fa-solid fa-scroll" aria-hidden="true"></i>
+                Its instructions -- the system prompt sent on every call
+            </summary>
+            <p class="u-text-sm u-text-muted">
+                The first part is shared by all six employees and explains the one rule that
+                shapes every reply: do the work, propose the action, and let a person release it.
+                The second part is this employee's job. Edit it on the AI Employees page.
+            </p>
+            <pre class="code-block" style="white-space:pre-wrap;">{{ system_prompt }}</pre>
+        </details>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Page-local rules: the capability grid and its rows exist only here. */
+    .avatar--lg { width: 56px; height: 56px; font-size: var(--fs-xl); border-radius: var(--r-md);
+                  display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto; }
+    .capability-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-4); }
+    .capability-group { border: 1px solid var(--color-border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--color-surface); }
+    .capability-group__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+                                 margin: 0 0 var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-bold);
+                                 text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-subtle); }
+    .capability-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+    .capability { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-sm); }
+    .capability:hover { background: var(--color-surface-2); }
+    .capability__icon { flex: 0 0 auto; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+                        border-radius: var(--r-sm); background: var(--color-primary-soft); color: var(--color-primary); font-size: var(--fs-xs); }
+    .capability__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .capability__name { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--color-text); }
+    .capability__desc { font-size: var(--fs-xs); color: var(--color-text-muted); line-height: var(--lh-normal); }
+    .capability__meta { font-size: 0.6875rem; color: var(--color-text-subtle); }
+    .capability__meta code { font-family: var(--font-mono); }
+    .memory-row, .delegation { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: 1px solid var(--color-border); }
+    .memory-row:last-child, .delegation:last-child { border-bottom: 0; }
+    .delegation__who { flex: 0 0 auto; font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--color-text-subtle); min-width: 9rem; }
+    .delegation__text { flex: 1 1 auto; font-size: var(--fs-sm); color: var(--color-text); }
+    .task-row summary { list-style: none; cursor: pointer; }
+    .task-row summary::-webkit-details-marker { display: none; }
+</style>
+{% endblock %}

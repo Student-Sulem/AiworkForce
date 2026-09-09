@@ -53,11 +53,24 @@
       3. layout      the application shell and its breakpoints
       4. components  the reusable UI library
       5. pages       page-specific rules
-      6. utilities   last, so a utility class always wins
+      6. workforce   the six-employee platform's shared additions
+      7. actions     the approval queue and the orchestrator console
+      8. platform    integrations, settings and the audit log
+      9. ops         the operational pages
+     10. utilities   last, so a utility class always wins
+
+    The four platform sheets are separate files rather than more of pages.css
+    because each one belongs to a distinct area of the application, and a
+    single sheet of four thousand lines is a sheet nobody edits with
+    confidence.
 {% endcomment %}
 <link rel="stylesheet" href="{% static 'css/tokens.css' %}">
 <link rel="stylesheet" href="{% static 'css/base.css' %}">
 <link rel="stylesheet" href="{% static 'css/layout.css' %}">
 <link rel="stylesheet" href="{% static 'css/components.css' %}">
 <link rel="stylesheet" href="{% static 'css/pages.css' %}">
+<link rel="stylesheet" href="{% static 'css/workforce.css' %}">
+<link rel="stylesheet" href="{% static 'css/actions.css' %}">
+<link rel="stylesheet" href="{% static 'css/platform.css' %}">
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
 <link rel="stylesheet" href="{% static 'css/utilities.css' %}">

@@ -1,0 +1,395 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- People.
+    Rendered by marketing.views_ops.people_view at the URL named 'ops_people'.
+
+    STRUCTURE
+      1. four figures    headcount, active, onboarding, outstanding tasks
+      2. filters         search, department and employment status, as a GET form
+      3. the directory   a paginated table
+      4. onboarding      everybody mid-onboarding, each with a progress bar and
+                         their checklist, every task carrying a status control
+      5. reviews         performance reviews on file
+      6. announcements   what has been drafted for staff, and whether it went out
+
+    WHY SECTION 4 IS AS PROMINENT AS THE DIRECTORY
+    A directory is a lookup. Onboarding is work in progress, and a checklist
+    whose state nobody can see is a checklist that quietly stops being done.
+    The progress bar and the per-task control are therefore the operational half
+    of this page rather than an appendix to it.
+{% endcomment %}
+
+{% block title %}People | AI Workforce{% endblock %}
+{% block body_class %}page-ops page-ops-people{% endblock %}
+{% block page_title %}People{% endblock %}
+{% block page_subtitle %}
+    The employee directory, and every onboarding checklist {{ employee_name }} has built.
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_recruitment' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-briefcase" aria-hidden="true"></i> Recruitment
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask for an onboarding plan
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<!-- 1. Headline figures -------------------------------------------------- -->
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="People on file" value=total_people icon="fa-users" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Active" value=active_people icon="fa-user-check" tone="success" %}
+    {% include 'partials/_kpi_tile.html' with label="Onboarding" value=onboarding_count icon="fa-door-open" tone="info" meta="Still working through a checklist" %}
+    {% include 'partials/_kpi_tile.html' with label="Tasks outstanding" value=open_task_count icon="fa-list-check" tone="warning" meta="Across every checklist" %}
+</div>
+
+<!-- 2. Filters ----------------------------------------------------------- -->
+<form class="toolbar" method="get" action="{% url 'ops_people' %}">
+    <div class="toolbar__search">
+        <label class="sr-only" for="peopleSearch">Search people</label>
+        <input class="form-input" id="peopleSearch" type="search" name="q"
+               value="{{ search_query }}"
+               placeholder="Search by name, email or job title"
+               data-table-search="#peopleTable">
+    </div>
+    <div class="toolbar__filters">
+        <label class="sr-only" for="departmentFilter">Filter by department</label>
+        <select class="form-select" id="departmentFilter" name="department">
+            <option value="all" {% if department_filter == 'all' %}selected{% endif %}>Every department</option>
+            {% for name in departments %}
+            <option value="{{ name }}" {% if department_filter == name %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="employmentFilter">Filter by employment status</label>
+        <select class="form-select" id="employmentFilter" name="status">
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>Every status</option>
+            {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <button class="btn btn--secondary" type="submit">
+            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
+        </button>
+        {% if has_filters %}
+        <a class="btn btn--ghost" href="{% url 'ops_people' %}">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<!-- 3. The directory ----------------------------------------------------- -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <h2 class="card__title">
+            <i class="fa-solid fa-address-book" aria-hidden="true"></i> Directory
+        </h2>
+    </div>
+    <div class="card__body card__body--flush">
+        <div class="table-wrap">
+            <table class="table table--stack" id="peopleTable">
+                <thead>
+                    <tr>
+                        <th scope="col">Person</th>
+                        <th scope="col">Job title</th>
+                        <th scope="col">Department</th>
+                        <th scope="col">Manager</th>
+                        <th scope="col">Started</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Onboarding open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for person in people %}
+                    <tr>
+                        <td data-label="Person">
+                            <span class="u-flex u-items-center u-gap-3">
+                                <span class="avatar avatar--sm avatar--round"
+                                      style="background: var(--color-primary);">
+                                    {{ person.initials }}
+                                </span>
+                                <span>
+                                    <span class="u-semibold">{{ person.full_name }}</span>
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ person.email|default:"No email on file" }}
+                                    </span>
+                                </span>
+                            </span>
+                        </td>
+                        <td data-label="Job title">{{ person.job_title|default:"Not recorded" }}</td>
+                        <td data-label="Department">{{ person.department|default:"Unassigned" }}</td>
+                        <td data-label="Manager">
+                            {{ person.manager.full_name|default:"No manager recorded" }}
+                        </td>
+                        <td data-label="Started">
+                            {{ person.start_date|date:"j M Y"|default:"Not set" }}
+                        </td>
+                        <td data-label="Status">
+                            {% include 'partials/_status_badge.html' with status=person.employment_status label=person.get_employment_status_display dot=True %}
+                        </td>
+                        <td data-label="Onboarding open">
+                            {% if person.open_tasks %}
+                            <span class="badge badge--warning">{{ person.open_tasks }} open</span>
+                            {% else %}
+                            <span class="u-text-xs u-text-subtle">Nothing outstanding</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr data-empty-row>
+                        <td colspan="7">
+                            {% include 'partials/_empty_state.html' with icon="fa-user-slash" title="Nobody matches" message="Ask People Operations to record a hire, or clear the filters above. An employee record is normally created from a candidate once an offer is accepted." action_url=agents_url action_label="Talk to People Operations" %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                    <tr data-empty-row hidden>
+                        <td colspan="7">
+                            {% include 'partials/_empty_state.html' with icon="fa-magnifying-glass" title="No matches" message="Nobody on this page matches your search." %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+{% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
+
+<!-- 4. Onboarding -------------------------------------------------------- -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <div>
+            <h2 class="card__title">
+                <i class="fa-solid fa-door-open" aria-hidden="true"></i> Onboarding in progress
+            </h2>
+            <p class="card__subtitle">
+                Each checklist as {{ employee_name }} built it, with the owner and the timing
+                of every task.
+            </p>
+        </div>
+    </div>
+    <div class="card__body stack">
+        {% for person in onboarding_people %}
+        <article class="card">
+            <div class="card__header">
+                <div class="u-flex u-items-center u-gap-3 u-grow">
+                    <span class="avatar avatar--sm avatar--round"
+                          style="background: var(--color-primary);">
+                        {{ person.initials }}
+                    </span>
+                    <div class="u-grow">
+                        <h3 class="card__title u-m-0">{{ person.full_name }}</h3>
+                        <p class="card__subtitle u-m-0">
+                            {{ person.job_title|default:"Job title not recorded" }}
+                            &middot; starts
+                            {{ person.start_date|date:"j M Y"|default:"on a date not yet set" }}
+                        </p>
+                    </div>
+                </div>
+                <span class="badge badge--info">
+                    {{ person.open_onboarding_count }} still to do
+                </span>
+            </div>
+
+            <div class="card__body">
+                <div class="progress-row u-mb-4">
+                    <span class="progress progress--lg" role="progressbar"
+                          aria-valuenow="{{ person.onboarding_progress }}"
+                          aria-valuemin="0" aria-valuemax="100"
+                          aria-label="{{ person.full_name }}'s onboarding is {{ person.onboarding_progress }} per cent complete">
+                        <span class="progress__bar{% if person.onboarding_progress == 100 %} progress__bar--success{% endif %}"
+                              style="width: {{ person.onboarding_progress }}%;"></span>
+                    </span>
+                    <span class="progress__figure">{{ person.onboarding_progress }}%</span>
+                </div>
+
+                {% if person.onboarding_tasks.all %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Task</th>
+                                <th scope="col">Category</th>
+                                <th scope="col">Owner</th>
+                                <th scope="col">Due</th>
+                                <th scope="col">Status</th>
+                                {% if can_manage %}<th scope="col">Change status</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in person.onboarding_tasks.all %}
+                            <tr>
+                                <td data-label="Task">
+                                    <span class="u-semibold">{{ task.title }}</span>
+                                    {% if task.description %}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ task.description|truncatechars:110 }}
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Category">{{ task.get_category_display }}</td>
+                                <td data-label="Owner">{{ task.owner_role|default:"Unassigned" }}</td>
+                                <td data-label="Due">
+                                    {% if task.due_date %}
+                                        {{ task.due_date|date:"j M Y" }}
+                                    {% else %}
+                                        {{ task.timing_label }}
+                                    {% endif %}
+                                </td>
+                                <td data-label="Status">
+                                    <span id="taskStatus{{ task.pk }}">
+                                        {% include 'partials/_status_badge.html' with status=task.status label=task.get_status_display %}
+                                    </span>
+                                </td>
+                                {% if can_manage %}
+                                <td data-label="Change status">
+                                    <label class="sr-only" for="taskSelect{{ task.pk }}">
+                                        Change the status of "{{ task.title }}" for {{ person.full_name }}
+                                    </label>
+                                    <select class="form-select inline-select" id="taskSelect{{ task.pk }}"
+                                            data-ops-url="{% url 'api_ops_update' %}"
+                                            data-ops-model="onboarding_task"
+                                            data-ops-id="{{ task.pk }}"
+                                            data-ops-field="status"
+                                            data-ops-current="{{ task.status }}"
+                                            data-ops-display="#taskStatus{{ task.pk }}">
+                                        {% for value, label in task_status_choices %}
+                                        <option value="{{ value }}" {% if task.status == value %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">
+                    {{ person.full_name }} is marked as onboarding but has no checklist.
+                    Ask {{ employee_name }} to build one.
+                </p>
+                {% endif %}
+            </div>
+        </article>
+        {% empty %}
+        {% include 'partials/_empty_state.html' with icon="fa-door-closed" title="Nobody is onboarding" message="Ask People Operations to build an onboarding plan for a new starter. It writes the paperwork, access, equipment, training and introduction tasks with an owner and a due date for each." action_url=agents_url action_label="Talk to People Operations" %}
+        {% endfor %}
+    </div>
+</section>
+
+<div class="grid grid-2">
+
+    <!-- 5. Performance reviews ------------------------------------------- -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> Performance reviews
+            </h2>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if reviews %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Person</th>
+                            <th scope="col">Period</th>
+                            <th scope="col">Reviewer</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for review in reviews %}
+                        <tr>
+                            <td data-label="Person">{{ review.employee.full_name }}</td>
+                            <td data-label="Period">
+                                {{ review.period }}
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ review.section_count }} section{{ review.section_count|pluralize }}
+                                </span>
+                            </td>
+                            <td data-label="Reviewer">{{ review.reviewer|default:"Not named" }}</td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=review.status label=review.get_status_display %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {% include 'partials/_empty_state.html' with icon="fa-clipboard" title="No reviews on file" message="Ask People Operations to prepare a review template for somebody. It builds the sections; the judgements stay with the reviewer." action_url=agents_url action_label="Talk to People Operations" %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- 6. Announcements -------------------------------------------------- -->
+    <section class="card">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">
+                    <i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Staff announcements
+                </h2>
+                <p class="card__subtitle">
+                    Drafted here, published only once approved.
+                </p>
+            </div>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if announcements %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Announcement</th>
+                            <th scope="col">Audience</th>
+                            <th scope="col">Channel</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for announcement in announcements %}
+                        <tr>
+                            <td data-label="Announcement">
+                                <span class="u-semibold">{{ announcement.title }}</span>
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ announcement.body|truncatechars:90 }}
+                                </span>
+                            </td>
+                            <td data-label="Audience">{{ announcement.audience }}</td>
+                            <td data-label="Channel">{{ announcement.get_channel_display }}</td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=announcement.status label=announcement.get_status_display %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {% include 'partials/_empty_state.html' with icon="fa-bullhorn" title="No announcements drafted" message="Ask People Operations to write a staff announcement. It drafts the text and holds it in the approval queue, so nothing reaches everybody by accident." action_url=agents_url action_label="Talk to People Operations" %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/table.js' %}" defer></script>
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

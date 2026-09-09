@@ -1,0 +1,634 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one work item.
+    Rendered by marketing.views_ops.work_item_detail_view at the URL named
+    'ops_work_item'.
+
+    STRUCTURE
+      1. description         as written
+      2. acceptance criteria as a checklist, read-only
+      3. dependencies        BOTH directions: what blocks this, what this blocks
+      4. children            the items underneath it
+      5. comments            with author_label, so a person and an employee are
+                             distinguishable
+      6. artefacts           what the Developer employee wrote against this item
+      7. reviews             its findings, kept structured
+      8. actions             what has been prepared about this item
+      9. the rail            estimates, dates, the external reference, and the
+                             inline status, priority and assignee controls
+
+    WHY THE CRITERIA ARE NOT TICK BOXES
+    Acceptance criteria are the record of what "done" was agreed to mean. A tick
+    box here would imply this page decides whether they are met, which is a
+    judgement for the person doing the work and their reviewer.
+{% endcomment %}
+
+{% block title %}{{ item.reference }} {{ item.title|truncatechars:40 }} | Engineering{% endblock %}
+{% block body_class %}page-ops page-ops-work-item{% endblock %}
+{% block page_title %}{{ item.reference }} &middot; {{ item.title }}{% endblock %}
+{% block page_subtitle %}
+    {{ item.get_item_type_display }}
+    in <a href="{% url 'ops_project' item.project.pk %}">{{ item.project.name }}</a>
+    {% if item.sprint %}&middot; {{ item.sprint.name }}{% endif %}
+    &middot; held by {{ item.assignee_label }}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_project' item.project.pk %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> {{ item.project.key }}
+    </a>
+    <a href="{% url 'ops_engineering' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-table-columns" aria-hidden="true"></i> Board
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this item
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+{% if item.is_overdue %}
+<div class="alert alert--danger u-mb-4">
+    <i class="fa-solid fa-clock" aria-hidden="true"></i>
+    <span>
+        This item was due {{ item.due_date|date:"j M Y" }} and is
+        {{ item.days_overdue }} day{{ item.days_overdue|pluralize }} late. It is still
+        recorded as {{ item.get_status_display|lower }}.
+    </span>
+</div>
+{% endif %}
+
+{% if item.status == 'blocked' %}
+<div class="alert alert--warning u-mb-4">
+    <i class="fa-solid fa-ban" aria-hidden="true"></i>
+    <span>
+        Blocked.
+        {% if item.blocked_reason %}{{ item.blocked_reason }}{% else %}
+        No reason has been recorded, which is itself worth chasing.{% endif %}
+    </span>
+</div>
+{% endif %}
+
+<div class="detail-split">
+    <div class="stack">
+
+        <!-- 1 and 2. Description and acceptance criteria ------------------ -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid {{ item.type_icon }}" aria-hidden="true"></i>
+                        The work
+                    </h2>
+                </div>
+                <span class="prio prio--{{ item.priority }}">
+                    {{ item.get_priority_display }}
+                </span>
+            </div>
+            <div class="card__body">
+                {% if item.description %}
+                <p class="factlist__value">{{ item.description }}</p>
+                {% else %}
+                <p class="u-text-sm u-text-muted">
+                    No description was written. Ask {{ employee_name }} to expand this item
+                    into something a developer could pick up and start on.
+                </p>
+                {% endif %}
+
+                <h3 class="card__title u-mt-6 u-mb-2" id="criteriaHeading">
+                    Acceptance criteria
+                </h3>
+                {% if criteria %}
+                <ul class="criteria" aria-labelledby="criteriaHeading">
+                    {% for line in criteria %}
+                    <li>
+                        <i class="fa-regular fa-square" aria-hidden="true"></i>
+                        <span>{{ line }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <p class="u-text-xs u-text-subtle u-mt-2 u-mb-0">
+                    These decide when this item is finished. They are shown here as the
+                    record of that agreement rather than as something this page can tick off.
+                </p>
+                {% else %}
+                <div class="alert alert--warning">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span>
+                        No acceptance criteria. Without them nobody can say when this item is
+                        done, which is how work quietly stays open. Ask {{ employee_name }}
+                        to write them.
+                    </span>
+                </div>
+                {% endif %}
+
+                {% if labels %}
+                <p class="factlist__key u-mt-6">Labels</p>
+                <div class="chip-set">
+                    {% for label in labels %}
+                    <span class="chip">{{ label }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 3. Dependencies, both directions ------------------------------ -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-link" aria-hidden="true"></i> Dependencies
+                    </h2>
+                    <p class="card__subtitle">
+                        Both directions, because a stand-up asks two questions: what is
+                        holding this up, and what is this holding up.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="grid grid-2">
+                    <div>
+                        <p class="factlist__key">This item is blocked by</p>
+                        {% if depends_on %}
+                        <div class="stack">
+                            {% for other in depends_on %}
+                            <div class="tree__row tree__row--child">
+                                <i class="fa-solid {{ other.type_icon }}" aria-hidden="true"></i>
+                                <a href="{% url 'ops_work_item' other.pk %}">
+                                    <span class="board__ref">{{ other.reference }}</span>
+                                    {{ other.title|truncatechars:50 }}
+                                </a>
+                                {% include 'partials/_status_badge.html' with status=other.status label=other.get_status_display %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="u-text-sm u-text-muted u-m-0">Nothing. It can start.</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <p class="factlist__key">This item is blocking</p>
+                        {% if blocks %}
+                        <div class="stack">
+                            {% for other in blocks %}
+                            <div class="tree__row tree__row--child">
+                                <i class="fa-solid {{ other.type_icon }}" aria-hidden="true"></i>
+                                <a href="{% url 'ops_work_item' other.pk %}">
+                                    <span class="board__ref">{{ other.reference }}</span>
+                                    {{ other.title|truncatechars:50 }}
+                                </a>
+                                {% include 'partials/_status_badge.html' with status=other.status label=other.get_status_display %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="u-text-sm u-text-muted u-m-0">Nothing waits on it.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. Children ---------------------------------------------------- -->
+        {% if children %}
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-sitemap" aria-hidden="true"></i>
+                    Items underneath this one
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="tree">
+                    {% for child in children %}
+                    <div class="tree__row tree__row--child">
+                        <i class="fa-solid {{ child.type_icon }}" aria-hidden="true"></i>
+                        <a href="{% url 'ops_work_item' child.pk %}">
+                            <span class="board__ref">{{ child.reference }}</span>
+                            {{ child.title }}
+                        </a>
+                        <span class="prio prio--{{ child.priority }}">
+                            {{ child.get_priority_display }}
+                        </span>
+                        {% include 'partials/_status_badge.html' with status=child.status label=child.get_status_display %}
+                        <span class="u-text-xs u-text-subtle u-grow u-text-right">
+                            {{ child.assignee_label }}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- 5. Comments ---------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-comment-dots" aria-hidden="true"></i> Comments
+                </h2>
+            </div>
+            <div class="card__body">
+                {% if comments %}
+                <div class="thread">
+                    {% for comment in comments %}
+                    <article class="thread__msg{% if comment.agent_id %} thread__msg--outbound{% else %} thread__msg--inbound{% endif %}">
+                        <div class="thread__meta">
+                            <span class="thread__who">{{ comment.author_label }}</span>
+                            {% if comment.agent_id %}
+                            <span class="badge badge--info">AI employee</span>
+                            {% endif %}
+                            <span>{{ comment.created_at|date:"j M Y H:i" }}</span>
+                        </div>
+                        <p class="thread__body">{{ comment.body }}</p>
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-comment-slash" title="No comments" message="Ask Engineering Delivery for an update on this item and its note will be recorded here, attributed to the employee rather than to a person." action_url=agents_url action_label="Talk to Engineering Delivery" %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 6. Artefacts --------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-code" aria-hidden="true"></i> Code artefacts
+                    </h2>
+                    <p class="card__subtitle">
+                        Proposals about code, not changes to code.
+                        {{ developer_name }} has no tool that writes to a working tree.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body stack">
+                {% for artifact in artifacts %}
+                <article class="card">
+                    <div class="card__header">
+                        <div>
+                            <h3 class="card__title">{{ artifact.title }}</h3>
+                            <p class="card__subtitle">
+                                {{ artifact.get_kind_display }}
+                                &middot; {{ artifact.language }}
+                                &middot; {{ artifact.line_count }} line{{ artifact.line_count|pluralize }}
+                                {% if artifact.suggested_path %}
+                                &middot; suggested for <code>{{ artifact.suggested_path }}</code>
+                                {% endif %}
+                            </p>
+                        </div>
+                        {% include 'partials/_status_badge.html' with status=artifact.status label=artifact.get_status_display dot=True %}
+                    </div>
+                    <div class="card__body">
+                        {% if artifact.explanation %}
+                        <p class="factlist__key">What it assumed, and what is most likely wrong</p>
+                        <p class="factlist__value">{{ artifact.explanation }}</p>
+                        {% endif %}
+                        <div class="scroll-panel u-mono" tabindex="0" role="region"
+                             aria-label="{{ artifact.title }} content">{{ artifact.content }}</div>
+                    </div>
+                </article>
+                {% empty %}
+                {% include 'partials/_empty_state.html' with icon="fa-code" title="Nothing written for this item" message="Ask Software Development to implement it, write its tests, or document it. The result is saved here as text for a developer to read, judge and apply by hand." action_url=agents_url action_label="Talk to Software Development" %}
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- 7. Reviews ----------------------------------------------------- -->
+        {% if reviews %}
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                        Code reviews
+                    </h2>
+                    <p class="card__subtitle">
+                        An opinion for a human reviewer to weigh. Nothing here can approve,
+                        merge or block a pull request.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body stack">
+                {% for review in reviews %}
+                <article class="card">
+                    <div class="card__header">
+                        <div>
+                            <h3 class="card__title">{{ review.title }}</h3>
+                            <p class="card__subtitle">
+                                {% if review.pull_request_number %}
+                                    {{ review.repository }}#{{ review.pull_request_number }} &middot;
+                                {% endif %}
+                                {{ review.finding_count }} finding{{ review.finding_count|pluralize }},
+                                {{ review.blocking_count }} blocking
+                            </p>
+                        </div>
+                        <span class="badge badge--{% if review.verdict == 'approve' %}success{% elif review.verdict == 'request_changes' %}danger{% else %}info{% endif %}">
+                            {{ review.get_verdict_display }}
+                        </span>
+                    </div>
+                    <div class="card__body card__body--flush">
+                        {% if review.summary %}
+                        <div class="card__body">
+                            <p class="factlist__value u-m-0">{{ review.summary }}</p>
+                        </div>
+                        {% endif %}
+                        {% if review.findings %}
+                        <div class="table-wrap">
+                            <table class="table table--stack">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Severity</th>
+                                        <th scope="col">Where</th>
+                                        <th scope="col">Finding</th>
+                                        <th scope="col">Suggestion</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for finding in review.findings %}
+                                    <tr>
+                                        <td data-label="Severity">
+                                            <span class="prio prio--{{ finding.severity|lower }}">
+                                                {{ finding.severity|default:"unrated" }}
+                                            </span>
+                                        </td>
+                                        <td data-label="Where">
+                                            <code class="u-text-xs">
+                                                {{ finding.file|default:"unstated" }}{% if finding.line %}:{{ finding.line }}{% endif %}
+                                            </code>
+                                        </td>
+                                        <td data-label="Finding">{{ finding.note }}</td>
+                                        <td data-label="Suggestion">
+                                            {{ finding.suggestion|default:"--" }}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- 8. Prepared actions -------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                        Actions this item has generated
+                    </h2>
+                    <p class="card__subtitle">
+                        Filing this item externally, or notifying whoever holds it, waits here
+                        for a person.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if actions %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Action</th>
+                                <th scope="col">Reaches</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Decision</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for action in actions %}
+                            <tr>
+                                <td data-label="Action">
+                                    <a href="{% url 'action_detail' action.pk %}">
+                                        <i class="fa-solid {{ action.icon }}" aria-hidden="true"></i>
+                                        {{ action.title|truncatechars:60 }}
+                                    </a>
+                                </td>
+                                <td data-label="Reaches">{{ action.target_app }}</td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                                </td>
+                                <td data-label="Decision">{{ action.decision_summary }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing prepared" message="Ask Engineering Delivery to file this item in Jira or GitHub, or to notify whoever holds it. Either way the request waits in the approval queue with its full content attached." action_url=agents_url action_label="Talk to Engineering Delivery" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <!-- ============ Right: the record and the controls ============ -->
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i> The record
+                </h2>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Reference</span>
+                        <span class="datalist__value">
+                            <span class="chip chip--mono">{{ item.reference }}</span>
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Status</span>
+                        <span class="datalist__value" id="itemStatusLabel">
+                            {{ item.get_status_display }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Priority</span>
+                        <span class="datalist__value" id="itemPriorityLabel">
+                            {{ item.get_priority_display }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Assignee</span>
+                        <span class="datalist__value" id="itemAssigneeLabel">
+                            {{ item.assignee_label }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Complexity</span>
+                        <span class="datalist__value">{{ item.get_complexity_display }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Estimate</span>
+                        <span class="datalist__value">
+                            {% if item.estimate_points %}{{ item.estimate_points }} points{% endif %}
+                            {% if item.estimate_hours %}
+                                {% if item.estimate_points %} &middot; {% endif %}
+                                {{ item.estimate_hours }} hours
+                            {% endif %}
+                            {% if not item.estimate_points and not item.estimate_hours %}
+                                Not estimated
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Due</span>
+                        <span class="datalist__value">
+                            {{ item.due_date|date:"j M Y"|default:"No date set" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Build order hint</span>
+                        <span class="datalist__value">{{ item.sequence_hint }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Created</span>
+                        <span class="datalist__value">{{ item.created_at|date:"j M Y" }}</span>
+                    </div>
+                    {% if item.completed_at %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Completed</span>
+                        <span class="datalist__value">{{ item.completed_at|date:"j M Y H:i" }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="datalist__row">
+                        <span class="datalist__key">Planned by</span>
+                        <span class="datalist__value">
+                            {{ item.created_by_agent.name|default:"Unknown" }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {% if can_manage %}
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-sliders" aria-hidden="true"></i> Change this item
+                    </h2>
+                    <p class="card__subtitle">
+                        Saves immediately and writes an audit entry. Nothing here leaves the
+                        platform.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="form-field">
+                    <label class="form-field__label" for="itemStatusSelect">Status</label>
+                    <select class="form-select" id="itemStatusSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="work_item"
+                            data-ops-id="{{ item.pk }}"
+                            data-ops-field="status"
+                            data-ops-current="{{ item.status }}"
+                            data-ops-display="#itemStatusLabel">
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Marking this done stamps the completion time, which is what every
+                        velocity figure is computed from.
+                    </p>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field__label" for="itemPrioritySelect">Priority</label>
+                    <select class="form-select" id="itemPrioritySelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="work_item"
+                            data-ops-id="{{ item.pk }}"
+                            data-ops-field="priority"
+                            data-ops-current="{{ item.priority }}"
+                            data-ops-display="#itemPriorityLabel">
+                        {% for value, label in priority_choices %}
+                        <option value="{{ value }}" {% if item.priority == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-field__label" for="itemAssigneeSelect">Assignee</label>
+                    <select class="form-select" id="itemAssigneeSelect"
+                            data-ops-url="{% url 'api_ops_update' %}"
+                            data-ops-model="work_item"
+                            data-ops-id="{{ item.pk }}"
+                            data-ops-field="assignee"
+                            data-ops-current="{{ item.assignee_id|default_if_none:'' }}"
+                            data-ops-display="#itemAssigneeLabel">
+                        <option value="">Unassigned</option>
+                        {% for pk, name in assignee_choices %}
+                        <option value="{{ pk }}" {% if item.assignee_id == pk %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="form-field__hint">
+                        Only people in the employee directory appear here. Where an item is
+                        held by somebody not on file, the name is stored as text
+                        ({{ item.assignee_name|default:"nothing recorded" }}) and is left alone.
+                    </p>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    Outside the platform
+                </h2>
+            </div>
+            <div class="card__body">
+                {% if item.is_filed_externally %}
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Reference</span>
+                        <span class="datalist__value">
+                            {% if item.external_url %}
+                            <a href="{{ item.external_url }}" target="_blank"
+                               rel="noopener noreferrer">
+                                {{ item.external_reference }}
+                                <i class="fa-solid fa-arrow-up-right-from-square"
+                                   aria-hidden="true"></i>
+                            </a>
+                            {% else %}
+                            <span class="chip chip--mono">{{ item.external_reference }}</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+                {% else %}
+                <p class="u-text-sm u-text-muted u-m-0">
+                    This item has not been filed anywhere outside the platform. The internal
+                    plan is deliberately not hostage to a connected application: filing it
+                    externally is a separate act that a person approves.
+                </p>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

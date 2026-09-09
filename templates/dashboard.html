@@ -1,208 +1,431 @@
 {% extends 'base.html' %}
 {% comment %}
-    PAGE 1 of 6 -- Dashboard.
+    Dashboard -- the company overview.
     Rendered by marketing.views.dashboard_view at the URL named 'dashboard'.
+
+    FOUR BANDS, IN READING ORDER
+    ----------------------------
+      1. Getting started   the readiness checklist, only while something is
+                           still unconfigured
+      2. What needs you    the approval queue and anything urgent
+      3. The workforce     six employees, what each has been doing
+      4. The company       operational figures per area, and recent activity
+
+    The readiness band is first for a reason. A platform with eleven pages and
+    sixty tables is bewildering on a first run, and a wall of zeroes tells a
+    new user nothing about what to do. The checklist names what is missing,
+    says what still works without it, and links to the page that fixes it.
+
+    It disappears once everything is configured, which is the point: a
+    permanent banner is furniture, and furniture is not read.
 {% endcomment %}
 
 {% block title %}Dashboard | AI Workforce{% endblock %}
 {% block body_class %}page-dashboard{% endblock %}
-{% block page_title %}Dashboard{% endblock %}
+{% block page_title %}Company overview{% endblock %}
 {% block page_subtitle %}
-    Welcome back, {{ user.username }}. Here is what your AI workforce has been doing.
+    Six AI employees, {{ integration_total }} connected applications, and nothing
+    reaching the outside world without you.
 {% endblock %}
 
 {% block page_actions %}
-    <button class="btn btn--secondary" type="button" data-modal-open="newCampaignModal">
-        <i class="fa-solid fa-plus" aria-hidden="true"></i> New campaign
-    </button>
+    <a href="{% url 'orchestrator' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-shuffle" aria-hidden="true"></i> Ask the workforce
+    </a>
     <a href="{% url 'agents' %}" class="btn btn--primary">
         <i class="fa-solid fa-comments" aria-hidden="true"></i> Talk to an employee
     </a>
-    <a href="{% url 'approvals' %}" class="btn btn--secondary">
+    <a href="{% url 'actions' %}" class="btn btn--secondary">
         <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
-        Review queue{% if pending_count %} ({{ pending_count }}){% endif %}
+        Approvals{% if action_pending_count %} ({{ action_pending_count }}){% endif %}
     </a>
 {% endblock %}
 
 {% block content %}
 
-<!-- Headline figures -->
+{# ================================================================= #}
+{# BAND 1 -- Getting started                                          #}
+{# ================================================================= #}
+{% if readiness %}
+<section class="card u-mb-6">
+    <div class="card__header">
+        <h2 class="card__title">
+            <i class="fa-solid fa-list-check" aria-hidden="true"></i> Readiness
+        </h2>
+        <span class="u-text-xs u-text-subtle">What is set up, and what to do next</span>
+    </div>
+    <div class="card__body">
+        <ul class="readiness">
+            {% for item in readiness %}
+            <li class="readiness__item readiness__item--{{ item.level }}">
+                <span class="readiness__mark" aria-hidden="true">
+                    {% if item.level == 'ok' %}<i class="fa-solid fa-circle-check"></i>
+                    {% elif item.level == 'warn' %}<i class="fa-solid fa-circle-exclamation"></i>
+                    {% else %}<i class="fa-regular fa-circle"></i>{% endif %}
+                </span>
+                <span class="readiness__text u-grow">
+                    <span class="readiness__title">{{ item.title }}</span>
+                    <span class="readiness__detail">{{ item.detail }}</span>
+                </span>
+                <a href="{% url item.url_name %}" class="btn btn--secondary btn--sm">
+                    {{ item.action }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</section>
+{% endif %}
+
+{# ================================================================= #}
+{# BAND 2 -- What needs a person                                      #}
+{# ================================================================= #}
 <div class="grid grid-kpi u-mb-6">
-    {% include 'partials/_kpi_tile.html' with label="Total prospects" value=total_leads icon="fa-users" tone="primary" meta=hot_leads|stringformat:"s"|add:" rated hot" %}
-    {% include 'partials/_kpi_tile.html' with label="Awaiting approval" value=pending_count icon="fa-clock" tone="warning" href="/approvals/" meta="Nothing publishes without you" %}
-    {% include 'partials/_kpi_tile.html' with label="Published posts" value=published_posts icon="fa-share-nodes" tone="success" meta="Approved and live" %}
-    {% include 'partials/_kpi_tile.html' with label="Active campaigns" value=active_campaigns icon="fa-bullhorn" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Waiting for approval" value=action_pending_count icon="fa-clipboard-check" tone="warning" href="/actions/" meta=action_high_risk_count|stringformat:"s"|add:" would leave the company" %}
+    {% include 'partials/_kpi_tile.html' with label="Decided today" value=action_approved_today icon="fa-circle-check" tone="success" meta="Approved and carried out" %}
+    {% include 'partials/_kpi_tile.html' with label="Simulated so far" value=action_simulated_count icon="fa-flask" tone="info" href="/integrations/" meta="Demo mode, clearly labelled" %}
+    {% include 'partials/_kpi_tile.html' with label="Needs a person" value=urgent_ticket_count icon="fa-triangle-exclamation" tone="danger" href="/operations/support/" meta="Urgent or escalated tickets" %}
+</div>
+
+{% if needs_human_tickets %}
+<div class="notice-panel notice-panel--danger">
+    <span class="notice-panel__icon"><i class="fa-solid fa-user-shield" aria-hidden="true"></i></span>
+    <span>
+        <strong>{{ needs_human_tickets|length }} ticket{{ needs_human_tickets|pluralize }}
+        must be handled by a person, not by an AI reply.</strong>
+        The Customer Support employee flagged these and will not draft a response to them.
+        {% for ticket in needs_human_tickets %}
+            <a href="{% url 'ops_ticket' ticket.pk %}">{{ ticket.reference }}</a>{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    </span>
+</div>
+{% endif %}
+
+{# ================================================================= #}
+{# BAND 3 -- The workforce                                            #}
+{# ================================================================= #}
+<section class="card u-mb-6">
+    <div class="card__header">
+        <h2 class="card__title">
+            <i class="fa-solid fa-users-gear" aria-hidden="true"></i> The workforce
+        </h2>
+        <a href="{% url 'agents' %}" class="btn btn--ghost btn--sm">Open chat</a>
+    </div>
+    <div class="card__body">
+        <p class="u-text-sm u-text-muted u-mt-0">
+            Each employee has real capabilities and reaches real applications. Work
+            that stays inside the platform happens straight away; anything that would
+            reach someone outside it waits in the approval queue with its full
+            content attached.
+        </p>
+
+        <div class="roster">
+            {% for employee in agents %}
+            <article class="roster__card">
+                <header class="roster__head">
+                    <span class="avatar" style="background: {{ employee.avatar_color }};">
+                        <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
+                    </span>
+                    <span class="u-grow" style="min-width:0;">
+                        <a href="{% url 'employee_profile' employee.agent_type %}"
+                           class="roster__name">{{ employee.name }}</a>
+                        <span class="roster__role">{{ employee.role }}</span>
+                    </span>
+                </header>
+
+                <p class="roster__desc">{{ employee.persona_description }}</p>
+
+                <dl class="roster__stats">
+                    <div>
+                        <dt>Capabilities</dt>
+                        <dd>{{ employee.capability_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Open tasks</dt>
+                        <dd>{{ employee.open_task_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Awaiting you</dt>
+                        <dd>{{ employee.pending_action_count }}</dd>
+                    </div>
+                </dl>
+
+                <footer class="roster__foot">
+                    {% if employee.has_live_llm %}
+                        <span class="mode-pill mode-pill--live">
+                            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+                            {{ employee.llm_model.model_id|truncatechars:26 }}
+                        </span>
+                    {% else %}
+                        <span class="mode-pill mode-pill--demo">
+                            <i class="fa-solid fa-wrench" aria-hidden="true"></i>
+                            Tools only, no model
+                        </span>
+                    {% endif %}
+                    <a href="{% url 'employee_profile' employee.agent_type %}"
+                       class="btn btn--ghost btn--sm">Profile</a>
+                </footer>
+            </article>
+            {% empty %}
+                {% include 'partials/_empty_state.html' with icon="fa-user-slash" title="No employees yet" message="Run manage.py seed_workforce to provision the roster." %}
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+{# ================================================================= #}
+{# BAND 4 -- The company                                              #}
+{# ================================================================= #}
+<div class="grid grid-2 u-mb-6">
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-building" aria-hidden="true"></i> Across the company
+            </h2>
+        </div>
+        <div class="card__body">
+            <ul class="area-list">
+                <li class="area-list__item">
+                    <a href="{% url 'ops_recruitment' %}" class="area-list__link">
+                        <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                        <span class="u-grow">Recruitment</span>
+                        <span class="area-list__figures">
+                            <strong>{{ open_role_count }}</strong> open role{{ open_role_count|pluralize }},
+                            <strong>{{ candidate_active_count }}</strong> candidate{{ candidate_active_count|pluralize }},
+                            <strong>{{ interviews_this_week }}</strong> interview{{ interviews_this_week|pluralize }} this week
+                        </span>
+                    </a>
+                </li>
+                <li class="area-list__item">
+                    <a href="{% url 'ops_engineering' %}" class="area-list__link">
+                        <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
+                        <span class="u-grow">Engineering</span>
+                        <span class="area-list__figures">
+                            <strong>{{ open_work_item_count }}</strong> open,
+                            <strong>{{ overdue_work_item_count }}</strong> overdue,
+                            <strong>{{ blocked_work_item_count }}</strong> blocked
+                        </span>
+                    </a>
+                </li>
+                <li class="area-list__item">
+                    <a href="{% url 'ops_support' %}" class="area-list__link">
+                        <i class="fa-solid fa-headset" aria-hidden="true"></i>
+                        <span class="u-grow">Support</span>
+                        <span class="area-list__figures">
+                            <strong>{{ open_ticket_count }}</strong> open,
+                            <strong>{{ urgent_ticket_count }}</strong> urgent
+                        </span>
+                    </a>
+                </li>
+                <li class="area-list__item">
+                    <a href="{% url 'ops_content' %}" class="area-list__link">
+                        <i class="fa-solid fa-bullhorn" aria-hidden="true"></i>
+                        <span class="u-grow">Marketing</span>
+                        <span class="area-list__figures">
+                            <strong>{{ content_pending_count }}</strong> in draft,
+                            <strong>{{ content_published_count }}</strong> published,
+                            <strong>{{ active_campaigns }}</strong> campaign{{ active_campaigns|pluralize }}
+                        </span>
+                    </a>
+                </li>
+                <li class="area-list__item">
+                    <a href="{% url 'ops_knowledge' %}" class="area-list__link">
+                        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+                        <span class="u-grow">Knowledge</span>
+                        <span class="area-list__figures">
+                            <strong>{{ document_count }}</strong> document{{ document_count|pluralize }},
+                            <strong>{{ chunk_count }}</strong> searchable passage{{ chunk_count|pluralize }}
+                        </span>
+                    </a>
+                </li>
+                <li class="area-list__item">
+                    <a href="{% url 'ops_people' %}" class="area-list__link">
+                        <i class="fa-solid fa-id-card" aria-hidden="true"></i>
+                        <span class="u-grow">People</span>
+                        <span class="area-list__figures">
+                            <strong>{{ tasks_completed_fortnight }}</strong> employee task{{ tasks_completed_fortnight|pluralize }}
+                            completed this fortnight
+                        </span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Latest proposed actions
+            </h2>
+            <a href="{% url 'actions' %}" class="btn btn--ghost btn--sm">See all</a>
+        </div>
+        <div class="card__body">
+            {% if recent_actions %}
+            <ul class="stack stack--tight">
+                {% for action in recent_actions %}
+                <li>
+                    <a href="{% url 'action_detail' action.pk %}" class="action-row">
+                        <span class="action-row__icon" aria-hidden="true">
+                            <i class="fa-solid {{ action.icon }}"></i>
+                        </span>
+                        <span class="u-grow" style="min-width:0;">
+                            <span class="action-row__title u-truncate">{{ action.title }}</span>
+                            <span class="action-row__meta">
+                                {{ action.target_app }}
+                                {% if action.agent %}&middot; {{ action.agent.name }}{% endif %}
+                                {% if action.was_edited %}&middot; edited by a reviewer{% endif %}
+                            </span>
+                        </span>
+                        {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-inbox" title="Nothing proposed yet" message="Ask an employee for something that leaves the company -- an email, a Slack message, a Jira issue -- and it will appear here for you to approve." %}
+            {% endif %}
+        </div>
+    </section>
 </div>
 
 <div class="grid grid-2 u-mb-6">
 
-    <!-- Start a conversation with an employee -->
     <section class="card">
         <div class="card__header">
             <h2 class="card__title">
-                <i class="fa-solid fa-comments" aria-hidden="true"></i> Your AI employees
+                <i class="fa-solid fa-plug-circle-check" aria-hidden="true"></i> Connected applications
             </h2>
-            <a href="{% url 'agents' %}" class="btn btn--ghost btn--sm">Open chat</a>
+            <a href="{% url 'integrations' %}" class="btn btn--ghost btn--sm">Configure</a>
         </div>
-        <div class="card__body stack">
-            <p class="u-text-sm u-text-muted u-m-0">
-                Talk to an employee to get work drafted. Nothing it writes goes anywhere
-                until you send it to the approval queue and approve it there.
+        <div class="card__body">
+            <p class="u-text-sm u-text-muted u-mt-0">
+                {{ integration_live_count }} live, {{ integration_demo_count }} simulating.
+                An application without a credential is not broken -- it simulates its
+                actions and says so everywhere they appear.
             </p>
-
-            {% for employee in agents %}
-            <a class="start-chat" href="{% url 'agents' %}">
-                <span class="avatar" style="background: {{ employee.avatar_color }};">
-                    <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
-                </span>
-                <span class="u-grow" style="min-width:0;">
-                    <span class="u-semibold" style="display:block;">{{ employee.name }}</span>
-                    <span class="u-text-xs u-text-subtle u-truncate" style="display:block;">
-                        {{ employee.role }}
-                        {% if employee.has_live_llm %}
-                            &middot; {{ employee.llm_model.model_id }}
-                        {% else %}
-                            &middot; template replies
-                        {% endif %}
-                    </span>
-                </span>
-                <i class="fa-solid fa-chevron-right u-text-subtle" aria-hidden="true"></i>
-            </a>
-            {% endfor %}
+            <ul class="integration-strip">
+                {% for row in integrations %}
+                <li>
+                    <a href="{% url 'integration_detail' row.provider_key %}"
+                       class="integration-strip__item" title="{{ row.name }}: {{ row.effective_mode }}">
+                        <span class="integration-strip__icon" style="color: {{ row.color }};">
+                            <i class="fa-solid {{ row.icon }}" aria-hidden="true"></i>
+                        </span>
+                        <span class="integration-strip__name u-truncate">{{ row.name }}</span>
+                        <span class="mode-pill mode-pill--{{ row.effective_mode }}">
+                            {{ row.effective_mode }}
+                        </span>
+                    </a>
+                </li>
+                {% empty %}
+                    {% include 'partials/_empty_state.html' with icon="fa-plug" title="No integrations registered" message="Run manage.py sync_workforce to register the connectors." %}
+                {% endfor %}
+            </ul>
         </div>
     </section>
 
-    <!-- Platform health -->
     <section class="card">
         <div class="card__header">
             <h2 class="card__title">
-                <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i> Platform status
+                <i class="fa-solid fa-list-check" aria-hidden="true"></i> Recent activity
             </h2>
+            <a href="{% url 'audit_log' %}" class="btn btn--ghost btn--sm">Audit log</a>
         </div>
         <div class="card__body">
-            <div class="datalist">
-                <div class="datalist__row">
-                    <span class="datalist__key">MCP servers connected</span>
-                    <span class="datalist__value">{{ online_servers }} of {{ total_servers }}</span>
-                </div>
-                <div class="datalist__row">
-                    <span class="datalist__key">LLM providers configured</span>
-                    <span class="datalist__value">{{ configured_providers }} of 3</span>
-                </div>
-                <div class="datalist__row">
-                    <span class="datalist__key">Approved today</span>
-                    <span class="datalist__value">{{ approved_today }}</span>
-                </div>
-                <div class="datalist__row">
-                    <span class="datalist__key">Rejected all time</span>
-                    <span class="datalist__value">{{ rejected_count }}</span>
-                </div>
-            </div>
-
-            <div class="u-flex u-gap-2 u-wrap u-mt-6">
-                <a href="{% url 'configurations' %}" class="btn btn--secondary btn--sm">
-                    <i class="fa-solid fa-sliders" aria-hidden="true"></i> Configurations
-                </a>
-                <a href="{% url 'mcp_tools' %}" class="btn btn--secondary btn--sm">
-                    <i class="fa-solid fa-plug-circle-bolt" aria-hidden="true"></i> MCP tools
-                </a>
-            </div>
+            {% if recent_events %}
+            <ul class="timeline">
+                {% for event in recent_events %}
+                <li class="timeline__item timeline__item--{{ event.status }}">
+                    <span class="timeline__title">{{ event.message|default:event.action }}</span>
+                    <span class="timeline__meta">
+                        {{ event.actor_label }}
+                        {% if event.target_app %}&middot; {{ event.target_app }}{% endif %}
+                        &middot; {{ event.created_at|timesince }} ago
+                        {% if event.status == 'demo' %}&middot; simulated{% endif %}
+                    </span>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="u-text-xs u-text-subtle u-mb-0">
+                {{ events_today }} event{{ events_today|pluralize }} recorded today.
+            </p>
+            {% else %}
+                {% include 'partials/_empty_state.html' with icon="fa-clock-rotate-left" title="No activity yet" message="Every tool call, approval and execution is recorded here as it happens." %}
+            {% endif %}
         </div>
     </section>
 </div>
 
+{% if campaigns or recent_approvals %}
 <div class="grid grid-2">
-
-    <!-- Campaigns -->
+    {% if campaigns %}
     <section class="card">
         <div class="card__header">
             <h2 class="card__title">
                 <i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Campaigns
             </h2>
             <button class="btn btn--ghost btn--sm" type="button" data-modal-open="newCampaignModal">
-                <i class="fa-solid fa-plus" aria-hidden="true"></i> New
+                New campaign
             </button>
         </div>
-        <div class="card__body card__body--flush">
-            {% if campaigns %}
-            <div class="table-wrap">
-                <table class="table table--stack">
-                    <thead>
-                        <tr>
-                            <th scope="col">Campaign</th>
-                            <th scope="col">Assigned to</th>
-                            <th scope="col">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for campaign in campaigns %}
-                        <tr>
-                            <td data-label="Campaign">
-                                <span class="u-semibold">{{ campaign.name }}</span>
-                                <span class="u-text-xs u-text-subtle" style="display:block;">
-                                    {{ campaign.target_audience|truncatechars:44 }}
-                                </span>
-                            </td>
-                            <td data-label="Assigned to">
-                                {{ campaign.assigned_agent.name|default:"Unassigned" }}
-                            </td>
-                            <td data-label="Status">
-                                {% include 'partials/_status_badge.html' with status=campaign.status label=campaign.get_status_display %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-                {% include 'partials/_empty_state.html' with icon="fa-bullhorn" title="No campaigns yet" message="Create a campaign to give your AI employees something to work towards." %}
-            {% endif %}
+        <div class="card__body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th scope="col">Campaign</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Employee</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for campaign in campaigns %}
+                    <tr>
+                        <td>{{ campaign.name }}</td>
+                        <td>{% include 'partials/_status_badge.html' with status=campaign.status label=campaign.get_status_display %}</td>
+                        <td class="u-text-muted">{{ campaign.assigned_agent.name|default:"Unassigned" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </section>
+    {% endif %}
 
-    <!-- Recent activity -->
+    {% if recent_approvals %}
     <section class="card">
         <div class="card__header">
             <h2 class="card__title">
-                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent activity
+                <i class="fa-solid fa-file-pen" aria-hidden="true"></i> Drafted content
             </h2>
-            <a href="{% url 'approvals' %}" class="btn btn--ghost btn--sm">View all</a>
+            <a href="{% url 'approvals' %}" class="btn btn--ghost btn--sm">Review</a>
         </div>
-        <div class="card__body card__body--flush">
-            {% if recent_approvals %}
-            <div class="table-wrap">
-                <table class="table table--stack">
-                    <thead>
-                        <tr>
-                            <th scope="col">Item</th>
-                            <th scope="col">Employee</th>
-                            <th scope="col">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for approval in recent_approvals %}
-                        <tr>
-                            <td data-label="Item">
-                                <a href="{% url 'approval_detail' approval.pk %}">
-                                    <i class="fa-solid {{ approval.icon }}" aria-hidden="true"></i>
-                                    {{ approval.title|truncatechars:38 }}
-                                </a>
-                            </td>
-                            <td data-label="Employee">{{ approval.agent.name|default:"System" }}</td>
-                            <td data-label="Status">
-                                {% include 'partials/_status_badge.html' with status=approval.status label=approval.get_status_display %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-                {% include 'partials/_empty_state.html' with icon="fa-inbox" title="No activity yet" message="Run an AI employee above to generate your first draft." %}
-            {% endif %}
+        <div class="card__body">
+            <p class="u-text-sm u-text-muted u-mt-0">
+                Chat replies somebody put forward as a post, an email or an insight.
+                {{ pending_count }} still awaiting a decision.
+            </p>
+            <ul class="stack stack--tight">
+                {% for approval in recent_approvals %}
+                <li>
+                    <a href="{% url 'approval_detail' approval.pk %}" class="action-row">
+                        <span class="action-row__icon" aria-hidden="true">
+                            <i class="fa-solid {{ approval.icon }}"></i>
+                        </span>
+                        <span class="u-grow" style="min-width:0;">
+                            <span class="action-row__title u-truncate">{{ approval.title }}</span>
+                            <span class="action-row__meta">{{ approval.agent.name|default:"unknown" }}</span>
+                        </span>
+                        {% include 'partials/_status_badge.html' with status=approval.status label=approval.get_status_display %}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
         </div>
     </section>
+    {% endif %}
 </div>
+{% endif %}
 {% endblock %}
 
 
@@ -238,4 +461,3 @@
     </div>
 </div>
 {% endblock %}
-

@@ -11,9 +11,34 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from . import env
+
+# ---------------------------------------------------------------------------
+# Are we running the test suite?
+#
+# THIS MATTERS MORE THAN IT LOOKS. Django replaces its own email backend with
+# an in-memory one during tests, so anything sent through django.core.mail is
+# captured. The integration connectors in marketing/integrations do NOT go
+# through that: the Gmail connector opens smtplib itself, the Slack connector
+# opens an HTTPS connection itself. Django's substitution cannot reach them.
+#
+# So without this flag, a test that exercised an approved email action against
+# a .env holding real credentials would send real mail to whatever address the
+# test fixture invented. That happened once during development, which is why
+# the flag exists rather than being a precaution.
+#
+# marketing/integrations/base.py reads it and forces every connector into its
+# simulated path while it is set. A test can still assert on what WOULD have
+# been sent, because the simulation reports the arguments it was given.
+# ---------------------------------------------------------------------------
+TESTING = (
+    'test' in sys.argv
+    or 'pytest' in sys.modules
+    or os.environ.get('AIWORKFORCE_FORCE_DEMO') == '1'
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

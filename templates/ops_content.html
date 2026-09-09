@@ -1,0 +1,517 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- Content and campaigns.
+    Rendered by marketing.views_ops.content_view at the URL named 'ops_content'.
+
+    STRUCTURE
+      1. four figures    pieces, published, awaiting approval, planned slots
+      2. campaigns       cards with their brief, flagging any unsourced claim
+      3. filters         channel, status, campaign
+      4. the copy        a grid of cards, each with the channel, the status, a
+                         preview, the hashtags, the length against the channel's
+                         own limit, and the documents the facts came from
+      5. the calendar    a real four-week grid by date and channel
+      6. email           with the subject-length check
+      7. audiences       the segments
+
+    WHY PROVENANCE AND LENGTH ARE ON THE CARD
+    Marketing copy is the one place in this platform where an invented figure
+    reaches people who never asked the company anything: a published post is
+    screenshotted, and the company owns the number in it from the moment it goes
+    out. So `sources` and `unsourced_claims` are shown rather than filed, and
+    the character count is compared against the platform's own limit -- because
+    over the limit means the post is rejected by the platform, not merely long.
+{% endcomment %}
+
+{% block title %}Content | AI Workforce{% endblock %}
+{% block body_class %}page-ops page-ops-content{% endblock %}
+{% block page_title %}Content and campaigns{% endblock %}
+{% block page_subtitle %}
+    Everything {{ employee_name }} has written, with the evidence behind each claim and the
+    channel limits checked. Publishing stays behind human approval.
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    {% if employee %}
+    <a href="{% url 'employee_profile' employee.agent_type %}" class="btn btn--secondary">
+        <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
+        {{ employee.name }}
+    </a>
+    {% endif %}
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask for a post
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<!-- 1. Headline figures -------------------------------------------------- -->
+<div class="grid grid-kpi u-mb-6">
+    {% include 'partials/_kpi_tile.html' with label="Pieces written" value=total_pieces icon="fa-pen-nib" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Published" value=published_pieces icon="fa-share-nodes" tone="success" meta="Approved and live" %}
+    {% include 'partials/_kpi_tile.html' with label="Awaiting approval" value=pending_pieces icon="fa-clock" tone="warning" meta="Nothing publishes without a person" %}
+    {% include 'partials/_kpi_tile.html' with label="Slots planned" value=planned_entries icon="fa-calendar-days" tone="info" meta="Calendar entries with no draft yet" %}
+</div>
+
+<!-- 2. Campaigns and their briefs ---------------------------------------- -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <div>
+            <h2 class="card__title">
+                <i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Campaigns
+            </h2>
+            <p class="card__subtitle">
+                A brief carries proof points. A proof point with no source is flagged here,
+                because a claim nobody grounded in a document is the one that ends up public.
+            </p>
+        </div>
+    </div>
+    <div class="card__body">
+        {% if campaigns %}
+        <div class="grid grid-cards">
+            {% for campaign in campaigns %}
+            <article class="card">
+                <div class="card__body">
+                    <div class="u-flex u-items-start u-gap-3 u-mb-2">
+                        <h3 class="card__title u-grow u-m-0">{{ campaign.name }}</h3>
+                        {% include 'partials/_status_badge.html' with status=campaign.status label=campaign.get_status_display dot=True %}
+                    </div>
+                    <p class="u-text-xs u-text-subtle u-m-0">
+                        {{ campaign.piece_count }} piece{{ campaign.piece_count|pluralize }}
+                        &middot; assigned to
+                        {{ campaign.assigned_agent.name|default:"nobody" }}
+                    </p>
+
+                    {% if campaign.objective %}
+                    <p class="u-text-sm u-text-muted u-clamp-3 u-mt-2">{{ campaign.objective }}</p>
+                    {% endif %}
+
+                    {% for brief in campaign.briefs.all %}
+                    <div class="u-mt-4">
+                        <p class="factlist__key">The brief</p>
+                        {% if brief.key_message %}
+                        <p class="factlist__value u-semibold">{{ brief.key_message }}</p>
+                        {% endif %}
+                        <p class="u-text-xs u-text-subtle u-m-0">
+                            Audience: {{ brief.audience|default:"not stated" }}
+                            {% if brief.tone %}&middot; tone: {{ brief.tone }}{% endif %}
+                        </p>
+
+                        {% if brief.channel_labels %}
+                        <div class="chip-set u-mt-2">
+                            {% for label in brief.channel_labels %}
+                            <span class="chip">{{ label }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if brief.unsourced_claims %}
+                        <div class="alert alert--danger u-mt-4">
+                            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                            <span>
+                                {{ brief.unsourced_claims|length }}
+                                claim{{ brief.unsourced_claims|pluralize }} in this brief
+                                name no source:
+                                {% for row in brief.unsourced_claims %}
+                                    &ldquo;{{ row.claim|truncatechars:80 }}&rdquo;{% if not forloop.last %}; {% endif %}
+                                {% endfor %}.
+                                Ask Knowledge &amp; Research to find the document, or drop the
+                                claim.
+                            </span>
+                        </div>
+                        {% elif brief.is_grounded %}
+                        <p class="u-text-xs u-mt-2 u-mb-0" style="color: var(--color-success);">
+                            <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                            Every proof point names where it came from.
+                        </p>
+                        {% else %}
+                        <p class="u-text-xs u-text-subtle u-mt-2 u-mb-0">
+                            No proof points recorded, so this brief asserts nothing sourced.
+                        </p>
+                        {% endif %}
+                    </div>
+                    {% empty %}
+                    <p class="u-text-xs u-text-subtle u-mt-4 u-mb-0">
+                        No brief written. Ask {{ employee_name }} for one: a campaign without a
+                        stated objective, audience and proof points is a campaign nobody can
+                        say worked.
+                    </p>
+                    {% endfor %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+            {% include 'partials/_empty_state.html' with icon="fa-bullhorn" title="No campaigns yet" message="Ask Marketing & Communications for a campaign brief. It records the objective, the audience, the channels and the proof points, so what would count as success is written down before the copy is." action_url=agents_url action_label="Talk to Marketing & Communications" %}
+        {% endif %}
+    </div>
+</section>
+
+<!-- 3. Filters ----------------------------------------------------------- -->
+<form class="toolbar" method="get" action="{% url 'ops_content' %}">
+    <div class="toolbar__filters u-grow">
+        <label class="sr-only" for="channelFilter">Filter by channel</label>
+        <select class="form-select" id="channelFilter" name="channel">
+            <option value="all" {% if channel_filter == 'all' %}selected{% endif %}>Every channel</option>
+            {% for value, label in channel_choices %}
+            <option value="{{ value }}" {% if channel_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="contentStatusFilter">Filter by status</label>
+        <select class="form-select" id="contentStatusFilter" name="status">
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>Every status</option>
+            {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+
+        <label class="sr-only" for="campaignFilter">Filter by campaign</label>
+        <select class="form-select" id="campaignFilter" name="campaign">
+            <option value="all" {% if campaign_filter == 'all' %}selected{% endif %}>Every campaign</option>
+            {% for pk, name in campaign_choices %}
+            <option value="{{ pk }}" {% if campaign_filter == pk|stringformat:"s" %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+        </select>
+
+        <button class="btn btn--secondary" type="submit">
+            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
+        </button>
+        {% if has_filters %}
+        <a class="btn btn--ghost" href="{% url 'ops_content' %}">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<!-- 4. The copy ---------------------------------------------------------- -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <div>
+            <h2 class="card__title">
+                <i class="fa-solid fa-pen-nib" aria-hidden="true"></i> The copy
+            </h2>
+            <p class="card__subtitle">
+                Length is measured on the body plus the hashtag line, which is what would
+                genuinely be published.
+            </p>
+        </div>
+    </div>
+    <div class="card__body">
+        {% if rows %}
+        <div class="grid grid-cards">
+            {% for row in rows %}
+            <article class="card">
+                <div class="card__body">
+                    <div class="u-flex u-items-start u-gap-3 u-mb-2">
+                        <h3 class="card__title u-grow u-m-0">
+                            {{ row.piece.title|default:row.channel_label }}
+                        </h3>
+                        {% include 'partials/_status_badge.html' with status=row.piece.status label=row.piece.get_status_display dot=True %}
+                    </div>
+
+                    <p class="u-text-xs u-text-subtle u-m-0">
+                        <i class="fa-solid
+                            {% if row.piece.channel == 'linkedin' %}fa-share-nodes
+                            {% elif row.piece.channel == 'instagram' %}fa-camera
+                            {% elif row.piece.channel == 'twitter' %}fa-hashtag
+                            {% elif row.piece.channel == 'facebook' %}fa-thumbs-up
+                            {% elif row.piece.channel == 'blog' %}fa-file-lines
+                            {% elif row.piece.channel == 'email' %}fa-envelope
+                            {% elif row.piece.channel == 'ad' %}fa-rectangle-ad
+                            {% elif row.piece.channel == 'press' %}fa-newspaper
+                            {% else %}fa-globe{% endif %}" aria-hidden="true"></i>
+                        {{ row.channel_label }}
+                        &middot; {{ row.piece.get_kind_display }}
+                        {% if row.piece.campaign %}&middot; {{ row.piece.campaign.name }}{% endif %}
+                        {% if row.piece.variant_label %}
+                        &middot; variant {{ row.piece.variant_label }}
+                        {% endif %}
+                    </p>
+
+                    {% if row.piece.body %}
+                    <p class="body-preview u-mt-4">{{ row.piece.preview }}</p>
+                    {% else %}
+                    <p class="u-text-sm u-text-muted u-mt-4">No body written yet.</p>
+                    {% endif %}
+
+                    {% if row.piece.hashtag_line %}
+                    <p class="u-text-xs u-mt-2 u-mb-0" style="color: var(--color-primary);">
+                        {{ row.piece.hashtag_line }}
+                    </p>
+                    {% endif %}
+
+                    <!-- Length against the channel's own limit -->
+                    <div class="limit-row u-mt-4 {% if not row.fits %}limit-row--over{% endif %}">
+                        <i class="fa-solid {% if row.fits %}fa-circle-check{% else %}fa-circle-exclamation{% endif %}"
+                           aria-hidden="true"></i>
+                        <span class="limit-row__figure">
+                            {{ row.piece.character_count }}
+                            {% if row.limit %}/ {{ row.limit }}{% endif %} characters
+                        </span>
+                    </div>
+                    <p class="u-text-xs {% if row.fits %}u-text-subtle{% endif %} u-mt-1 u-mb-0"
+                       {% if not row.fits %}style="color: var(--color-danger);"{% endif %}>
+                        {{ row.note }}
+                    </p>
+
+                    <!-- Where the facts came from -->
+                    <p class="factlist__key u-mt-4">Sources</p>
+                    {% if row.piece.source_documents %}
+                    <div class="chip-set">
+                        {% for name in row.piece.source_documents %}
+                        <span class="chip">
+                            <i class="fa-solid fa-book" aria-hidden="true"></i> {{ name }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="u-text-xs u-text-subtle u-m-0">
+                        None recorded. Fine for an invitation, worth checking on anything that
+                        makes a claim about the company.
+                    </p>
+                    {% endif %}
+                </div>
+
+                <div class="card__footer">
+                    <span class="u-text-xs u-text-subtle u-grow">
+                        {{ row.piece.created_by_agent.name|default:"Unknown author" }}
+                        &middot; {{ row.piece.created_at|date:"j M Y" }}
+                    </span>
+                    {% if row.piece.external_url %}
+                    <a href="{{ row.piece.external_url }}" class="btn btn--ghost btn--sm"
+                       target="_blank" rel="noopener noreferrer">
+                        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                        Live
+                    </a>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+            {% include 'partials/_empty_state.html' with icon="fa-pen-nib" title="No copy yet" message="Ask Marketing & Communications for a post, a caption or ad copy. It writes for the platform, keeps within the channel's limits, and records the documents each fact came from." action_url=agents_url action_label="Talk to Marketing & Communications" %}
+        {% endif %}
+    </div>
+</section>
+
+{% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
+
+<!-- 5. The calendar ------------------------------------------------------ -->
+<section class="card u-mb-6">
+    <div class="card__header">
+        <div>
+            <h2 class="card__title">
+                <i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Content calendar
+            </h2>
+            <p class="card__subtitle">
+                Four weeks from the Monday of this week. An entry with no draft behind it is
+                a plan rather than a piece.
+            </p>
+        </div>
+    </div>
+    <div class="card__body">
+        <div class="calendar">
+            <div class="calendar__headings" aria-hidden="true">
+                <span class="calendar__heading">Mon</span>
+                <span class="calendar__heading">Tue</span>
+                <span class="calendar__heading">Wed</span>
+                <span class="calendar__heading">Thu</span>
+                <span class="calendar__heading">Fri</span>
+                <span class="calendar__heading">Sat</span>
+                <span class="calendar__heading">Sun</span>
+            </div>
+
+            {% for week in calendar_weeks %}
+            <div class="calendar__week">
+                {% for day in week.days %}
+                <div class="calendar__day{% if day.is_today %} calendar__day--today{% elif day.is_past %} calendar__day--past{% endif %}">
+                    <span class="calendar__date">
+                        {{ day.date|date:"D j M" }}
+                        {% if day.is_today %}
+                        <span class="badge badge--primary">Today</span>
+                        {% endif %}
+                    </span>
+
+                    {% comment %}
+                        A slot is a span rather than a link: there is no per-piece
+                        page to send a reader to, and a link that only re-filters
+                        the grid above would promise more than it delivers. The
+                        draft indicator is what actually matters here -- a slot
+                        with nothing written behind it is a plan, not a piece.
+                    {% endcomment %}
+                    {% for entry in day.entries %}
+                    <span class="calendar__entry calendar__entry--{{ entry.status }}">
+                        <span class="calendar__entry-channel">
+                            {% if entry.has_draft %}
+                            <i class="fa-solid fa-circle-check" aria-hidden="true"
+                               title="A draft exists"></i>
+                            {% else %}
+                            <i class="fa-regular fa-circle" aria-hidden="true"
+                               title="No draft written yet"></i>
+                            {% endif %}
+                            {{ entry.channel_display }}
+                        </span>
+                        <span class="calendar__entry-title">
+                            {{ entry.title|default:entry.slot|truncatechars:34 }}
+                        </span>
+                        <span class="sr-only">{{ entry.get_status_display }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if not planned_entries %}
+        <p class="u-text-sm u-text-muted u-mt-4 u-mb-0">
+            Nothing is scheduled. Ask {{ employee_name }} for a content calendar and it will
+            fill the slots with a channel, a date and an owner for each.
+        </p>
+        {% endif %}
+    </div>
+</section>
+
+<div class="grid grid-2">
+
+    <!-- 6. Marketing email ----------------------------------------------- -->
+    <section class="card">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">
+                    <i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i>
+                    Marketing email
+                </h2>
+                <p class="card__subtitle">
+                    A subject over {{ email_subject_limit }} characters is read as a fragment
+                    in most clients, which is worse than a shorter one read whole.
+                </p>
+            </div>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if emails %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Subject</th>
+                            <th scope="col">Audience</th>
+                            <th scope="col">Length</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for email in emails %}
+                        <tr>
+                            <td data-label="Subject">
+                                <span class="u-semibold">
+                                    {{ email.subject|default:email.name|default:"Untitled" }}
+                                </span>
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ email.get_kind_display }}
+                                    {% if email.campaign %}&middot; {{ email.campaign.name }}{% endif %}
+                                </span>
+                            </td>
+                            <td data-label="Audience">{{ email.audience_summary }}</td>
+                            <td data-label="Length">
+                                {% if email.subject_length_ok %}
+                                <span class="sla sla--ok">
+                                    {{ email.subject_length }} / {{ email_subject_limit }}
+                                </span>
+                                {% else %}
+                                <span class="sla sla--breach">
+                                    {{ email.subject_length }} / {{ email_subject_limit }}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Status">
+                                {% include 'partials/_status_badge.html' with status=email.status label=email.get_status_display %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {% include 'partials/_empty_state.html' with icon="fa-envelope" title="No mailings drafted" message="Ask Marketing & Communications for a newsletter or a campaign email. It goes to the approval queue with its full text, so nothing reaches a mailing list unread." action_url=agents_url action_label="Talk to Marketing & Communications" %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- 7. Audience segments ---------------------------------------------- -->
+    <section class="card">
+        <div class="card__header">
+            <h2 class="card__title">
+                <i class="fa-solid fa-users-viewfinder" aria-hidden="true"></i>
+                Audience segments
+            </h2>
+        </div>
+        <div class="card__body card__body--flush">
+            {% if segments %}
+            <div class="table-wrap">
+                <table class="table table--stack">
+                    <thead>
+                        <tr>
+                            <th scope="col">Segment</th>
+                            <th scope="col">Criteria</th>
+                            <th scope="col">Estimated size</th>
+                            <th scope="col">Fits</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for segment in segments %}
+                        <tr>
+                            <td data-label="Segment">
+                                <span class="u-semibold">{{ segment.name }}</span>
+                                {% if segment.description %}
+                                <span class="u-text-xs u-text-subtle" style="display:block;">
+                                    {{ segment.description|truncatechars:90 }}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Criteria">{{ segment.criteria_summary }}</td>
+                            <td data-label="Estimated size">
+                                {% if segment.estimated_size %}
+                                    {{ segment.estimated_size }}
+                                {% else %}
+                                    <span class="u-text-xs u-text-subtle">Unestimated</span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Fits">
+                                {% if segment.channel_labels %}
+                                <span class="chip-set">
+                                    {% for label in segment.channel_labels %}
+                                    <span class="chip">{{ label }}</span>
+                                    {% endfor %}
+                                </span>
+                                {% else %}
+                                <span class="u-text-xs u-text-subtle">Not stated</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {% include 'partials/_empty_state.html' with icon="fa-users-viewfinder" title="No segments defined" message="Ask Marketing & Communications to define who the work is for. A segment records the criteria rather than a description, so the same audience means the same thing next campaign." action_url=agents_url action_label="Talk to Marketing & Communications" %}
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}

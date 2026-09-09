@@ -1,0 +1,449 @@
+{% extends 'base.html' %}
+{% load static %}
+{% comment %}
+    OPERATIONS -- one project.
+    Rendered by marketing.views_ops.project_detail_view at the URL named
+    'ops_project'.
+
+    STRUCTURE
+      1. the record      status, dates, owner, repository, Jira key, stack
+      2. sprints         each with its committed and completed points
+      3. the work tree   parents with their children indented, and every
+                         dependency named as "blocked by ENG-12"
+      4. reports         status accounts kept with their figures
+      5. artefacts       what the Developer employee wrote for this project
+
+    WHY DEPENDENCIES ARE SPELLED OUT
+    A dependency drawn as an arrow, or implied by ordering, is a dependency
+    somebody misses. Naming the reference in words -- "blocked by ENG-12" --
+    makes it quotable in a stand-up, which is the only place it matters.
+
+    WHY THE ARTEFACT LIST SAYS "for a person to apply"
+    CodeArtifact is the Developer employee's boundary: it has no tool that
+    touches a working tree, so everything it writes is a proposal about code
+    rather than a change to code. The page says so rather than letting a reader
+    assume the repository already contains it.
+{% endcomment %}
+
+{% block title %}{{ project.name }} | Engineering{% endblock %}
+{% block body_class %}page-ops page-ops-project{% endblock %}
+{% block page_title %}{{ project.key }} &middot; {{ project.name }}{% endblock %}
+{% block page_subtitle %}
+    {{ item_count }} work item{{ item_count|pluralize }}
+    &middot; {{ project.progress_percent }}% of the live work finished
+    &middot; {{ project.get_status_display|lower }}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/ops.css' %}">
+{% endblock %}
+
+{% block page_actions %}
+    <a href="{% url 'ops_engineering' %}" class="btn btn--secondary">
+        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Engineering
+    </a>
+    <a href="{% url 'agents' %}" class="btn btn--primary">
+        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask about this project
+    </a>
+{% endblock %}
+
+{% block content %}
+{% url 'agents' as agents_url %}
+
+<div class="detail-split">
+    <div class="stack">
+
+        <!-- 2. Sprints ---------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-gauge-high" aria-hidden="true"></i> Sprints
+                </h2>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if sprints %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Sprint</th>
+                                <th scope="col">Dates</th>
+                                <th scope="col">Committed</th>
+                                <th scope="col">Completed</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sprint in sprints %}
+                            <tr>
+                                <td data-label="Sprint">
+                                    <span class="u-semibold">{{ sprint.name }}</span>
+                                    {% if sprint.goal %}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        {{ sprint.goal|truncatechars:90 }}
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Dates">
+                                    {% if sprint.start_date %}
+                                        {{ sprint.start_date|date:"j M" }} to
+                                        {{ sprint.end_date|date:"j M Y" }}
+                                    {% else %}
+                                        <span class="u-text-xs u-text-subtle">Not dated</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Committed">
+                                    {{ sprint.committed_points }} pt
+                                    {% if sprint.over_capacity_by %}
+                                    <span class="badge badge--warning">
+                                        {{ sprint.over_capacity_by }} over capacity
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Completed">{{ sprint.completed_points }} pt</td>
+                                <td data-label="Status">
+                                    {% include 'partials/_status_badge.html' with status=sprint.status label=sprint.get_status_display %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-calendar-plus" title="No sprints planned" message="Ask Engineering Delivery to plan a sprint. It compares the committed points against the team's stated capacity and reports the overflow rather than hiding it." action_url=agents_url action_label="Talk to Engineering Delivery" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 3. The work tree ---------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-sitemap" aria-hidden="true"></i> Work items
+                    </h2>
+                    <p class="card__subtitle">
+                        Parents with their children indented, in the build order
+                        {{ employee_name }} suggested. Dependencies are named explicitly.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                {% if tree %}
+                <div class="tree">
+                    {% for node in tree %}
+                    <div>
+                        <div class="tree__row">
+                            <i class="fa-solid {{ node.item.type_icon }}" aria-hidden="true"
+                               title="{{ node.item.get_item_type_display }}"></i>
+                            <a class="u-semibold" href="{% url 'ops_work_item' node.item.pk %}">
+                                <span class="board__ref">{{ node.item.reference }}</span>
+                                {{ node.item.title }}
+                            </a>
+                            <span class="prio prio--{{ node.item.priority }}">
+                                {{ node.item.get_priority_display }}
+                            </span>
+                            {% include 'partials/_status_badge.html' with status=node.item.status label=node.item.get_status_display %}
+                            {% if node.item.estimate_points %}
+                            <span class="chip chip--mono">{{ node.item.estimate_points }}pt</span>
+                            {% endif %}
+                            <span class="u-text-xs u-text-subtle u-grow u-text-right">
+                                {{ node.item.assignee_label }}
+                            </span>
+                            {% if node.item.is_overdue %}
+                            <span class="badge badge--danger">
+                                {{ node.item.days_overdue }} day{{ node.item.days_overdue|pluralize }} late
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        {% if node.item.depends_on.all %}
+                        <div class="u-flex u-gap-2 u-wrap u-mt-2" style="padding-left: var(--sp-4);">
+                            {% for dependency in node.item.depends_on.all %}
+                            <a class="blocked-by" href="{% url 'ops_work_item' dependency.pk %}">
+                                <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
+                                blocked by {{ dependency.reference }}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if node.children %}
+                        <div class="tree__children">
+                            {% for child in node.children %}
+                            <div>
+                                <div class="tree__row tree__row--child">
+                                    <i class="fa-solid {{ child.type_icon }}" aria-hidden="true"
+                                       title="{{ child.get_item_type_display }}"></i>
+                                    <a href="{% url 'ops_work_item' child.pk %}">
+                                        <span class="board__ref">{{ child.reference }}</span>
+                                        {{ child.title }}
+                                    </a>
+                                    <span class="prio prio--{{ child.priority }}">
+                                        {{ child.get_priority_display }}
+                                    </span>
+                                    {% include 'partials/_status_badge.html' with status=child.status label=child.get_status_display %}
+                                    <span class="u-text-xs u-text-subtle u-grow u-text-right">
+                                        {{ child.assignee_label }}
+                                    </span>
+                                </div>
+                                {% if child.depends_on.all %}
+                                <div class="u-flex u-gap-2 u-wrap u-mt-2">
+                                    {% for dependency in child.depends_on.all %}
+                                    <a class="blocked-by" href="{% url 'ops_work_item' dependency.pk %}">
+                                        <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
+                                        blocked by {{ dependency.reference }}
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+
+                {% if orphans %}
+                <p class="u-text-xs u-text-subtle u-mt-4 u-mb-0">
+                    {{ orphans|length }} item{{ orphans|pluralize }} in this project have a
+                    parent outside it and so sit outside the tree above:
+                    {% for item in orphans %}<a href="{% url 'ops_work_item' item.pk %}">{{ item.reference }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                </p>
+                {% endif %}
+
+                {% else %}
+                    {% include 'partials/_empty_state.html' with icon="fa-list-check" title="Nothing planned for this project" message="Ask Engineering Delivery to break the requirement down. It writes items small enough to finish inside a sprint, with acceptance criteria and their dependencies stated." action_url=agents_url action_label="Talk to Engineering Delivery" %}
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- 4. Reports ---------------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-chart-column" aria-hidden="true"></i> Reports
+                </h2>
+            </div>
+            <div class="card__body stack">
+                {% for report in reports %}
+                <article class="card">
+                    <div class="card__header">
+                        <div>
+                            <h3 class="card__title">{{ report.title }}</h3>
+                            <p class="card__subtitle">
+                                {{ report.get_kind_display }}
+                                {% if report.sprint %}&middot; {{ report.sprint.name }}{% endif %}
+                                &middot; written {{ report.created_at|date:"j M Y" }}
+                                by {{ report.created_by_agent.name|default:"an unknown author" }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="card__body">
+                        {% if report.body %}
+                        <div class="scroll-panel" tabindex="0" role="region"
+                             aria-label="{{ report.title }}">{{ report.body }}</div>
+                        {% endif %}
+                        {% if report.metrics %}
+                        <p class="factlist__key u-mt-4">Figures it was written from</p>
+                        <div class="chip-set">
+                            {% for key, value in report.metrics.items %}
+                            <span class="chip chip--mono">{{ key }}: {{ value }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </article>
+                {% empty %}
+                {% include 'partials/_empty_state.html' with icon="fa-file-lines" title="No reports for this project" message="Ask Engineering Delivery for a status report. It keeps the numbers beside the prose, so the report stays checkable after the live data has moved on." action_url=agents_url action_label="Talk to Engineering Delivery" %}
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- 5. Code artefacts --------------------------------------------- -->
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-code" aria-hidden="true"></i> Code artefacts
+                    </h2>
+                    <p class="card__subtitle">
+                        Written by {{ developer_name }} as text for a human developer to judge.
+                        Nothing here has been applied to the repository: that employee has no
+                        tool that can touch a working tree.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body card__body--flush">
+                {% if artifacts %}
+                <div class="table-wrap">
+                    <table class="table table--stack">
+                        <thead>
+                            <tr>
+                                <th scope="col">Artefact</th>
+                                <th scope="col">Kind</th>
+                                <th scope="col">Suggested path</th>
+                                <th scope="col">Lines</th>
+                                <th scope="col">State</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for artifact in artifacts %}
+                            <tr>
+                                <td data-label="Artefact">
+                                    <span class="u-semibold">{{ artifact.title }}</span>
+                                    {% if artifact.work_item %}
+                                    <span class="u-text-xs u-text-subtle" style="display:block;">
+                                        for <a href="{% url 'ops_work_item' artifact.work_item.pk %}">{{ artifact.work_item.reference }}</a>
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Kind">{{ artifact.get_kind_display }}</td>
+                                <td data-label="Suggested path">
+                                    {% if artifact.suggested_path %}
+                                    <code class="u-text-xs">{{ artifact.suggested_path }}</code>
+                                    {% else %}
+                                    <span class="u-text-xs u-text-subtle">No advice given</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Lines">{{ artifact.line_count }}</td>
+                                <td data-label="State">
+                                    {% include 'partials/_status_badge.html' with status=artifact.status label=artifact.get_status_display %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="card__body">
+                    {% include 'partials/_empty_state.html' with icon="fa-code" title="No artefacts for this project" message="Ask Software Development to write code, tests or documentation against one of the work items above. It saves the result here as text for a developer to review and apply by hand." action_url=agents_url action_label="Talk to Software Development" %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <!-- ============ Right: the record ============ -->
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <h2 class="card__title">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i> The project
+                </h2>
+                {% include 'partials/_status_badge.html' with status=project.status label=project.get_status_display dot=True %}
+            </div>
+            <div class="card__body">
+                {% if project.description %}
+                <p class="factlist__value u-mb-6">{{ project.description }}</p>
+                {% endif %}
+
+                <div class="progress-row u-mb-6">
+                    <span class="progress progress--lg" role="progressbar"
+                          aria-valuenow="{{ project.progress_percent }}"
+                          aria-valuemin="0" aria-valuemax="100"
+                          aria-label="{{ project.name }} is {{ project.progress_percent }} per cent complete">
+                        <span class="progress__bar{% if project.progress_percent == 100 %} progress__bar--success{% endif %}"
+                              style="width: {{ project.progress_percent }}%;"></span>
+                    </span>
+                    <span class="progress__figure">{{ project.progress_percent }}%</span>
+                </div>
+
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Reference prefix</span>
+                        <span class="datalist__value">
+                            <span class="chip chip--mono">{{ project.key }}</span>
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Owner</span>
+                        <span class="datalist__value">{{ project.owner|default:"Not recorded" }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Started</span>
+                        <span class="datalist__value">
+                            {{ project.start_date|date:"j M Y"|default:"Not set" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Target</span>
+                        <span class="datalist__value">
+                            {{ project.target_date|date:"j M Y"|default:"Not set" }}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Open items</span>
+                        <span class="datalist__value">{{ project.open_items }}</span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Done items</span>
+                        <span class="datalist__value">{{ project.done_items }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">
+                        <i class="fa-solid fa-plug" aria-hidden="true"></i> Where it lives
+                    </h2>
+                    <p class="card__subtitle">
+                        Stored rather than guessed, so a tool filing an issue knows the
+                        destination without being told again.
+                    </p>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="datalist">
+                    <div class="datalist__row">
+                        <span class="datalist__key">Repository</span>
+                        <span class="datalist__value">
+                            {% if project.repository %}
+                            <code class="u-text-xs">{{ project.repository }}</code>
+                            {% else %}
+                            <span class="u-text-xs u-text-subtle">Not connected</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="datalist__row">
+                        <span class="datalist__key">Jira project</span>
+                        <span class="datalist__value">
+                            {% if project.jira_project_key %}
+                            <span class="chip chip--mono">{{ project.jira_project_key }}</span>
+                            {% else %}
+                            <span class="u-text-xs u-text-subtle">Not connected</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                {% if tech_stack %}
+                <p class="factlist__key u-mt-6">Technologies in use</p>
+                <div class="chip-set">
+                    {% for entry in tech_stack %}
+                    <span class="chip">{{ entry }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <p class="u-text-xs u-text-subtle u-mt-6 u-mb-0">
+                    Recorded by
+                    {{ project.created_by_agent.name|default:project.created_by.username|default:"an unknown author" }}
+                    on {{ project.created_at|date:"j M Y" }}.
+                </p>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script src="{% static 'js/ops.js' %}" defer></script>
+{% endblock %}
