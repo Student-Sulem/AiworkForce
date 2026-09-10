@@ -21,3 +21,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('marketing.urls')),
 ]
+
+# Custom error pages (templates/400.html ... 500.html). These are only used
+# when DEBUG is False; in DEBUG Django shows its detailed technical pages.
+handler400 = 'django.views.defaults.bad_request'
+handler403 = 'django.views.defaults.permission_denied'
+handler404 = 'django.views.defaults.page_not_found'
+handler500 = 'django.views.defaults.server_error'

@@ -1679,7 +1679,7 @@ class AgentPromptTests(TestCase):
         for agent in AIAgent.objects.all():
             with self.subTest(agent=agent.name):
                 self.assertIn('Use your tools', agent.system_prompt)
-                self.assertIn('Call the tool.', agent.system_prompt)
+                self.assertIn('Call the tool', agent.system_prompt)
 
     def test_hr_is_never_told_to_improvise_a_policy(self):
         """The People Operations job description carries its own guardrail,
@@ -2192,6 +2192,12 @@ class WorkforceOSTests(TestCase):
         self.user.profile.save()
         agent_engine.ensure_workspace_for_user(self.user)
         self.hr = AIAgent.objects.get(agent_type='hr')
+        # Seed a couple of employees so the announcement tool has recipients
+        from marketing.models_hr import Employee
+        Employee.objects.create(full_name='Test User', email='test@company.com',
+                                 employment_status='active')
+        Employee.objects.create(full_name='Test User 2', email='test2@company.com',
+                                 employment_status='active')
 
     # --- provisioning -------------------------------------------------------
 
@@ -2212,7 +2218,7 @@ class WorkforceOSTests(TestCase):
         return tools.run('hr.send_hr_announcement', ctx, {
             'title': 'Office closed Friday',
             'body': 'The office is closed for a public holiday.',
-            'channel': 'slack',
+            'channel': 'email',
         })
 
     def test_an_approval_gated_tool_only_queues_an_action(self):
@@ -2245,7 +2251,6 @@ class WorkforceOSTests(TestCase):
         action = ProposedAction.objects.get(pk=result.pending_action_id)
 
         outcome = approvals.approve(action, self.user)
-
         self.assertTrue(outcome['ok'])
         action.refresh_from_db()
         self.assertEqual(action.status, 'executed')
@@ -2294,5 +2299,5 @@ class WorkforceOSTests(TestCase):
     # --- integrations always simulate while the test suite runs -------------
 
     def test_a_slack_call_is_simulated_under_testing(self):
-        result = integrations.call('slack', 'post_message', channel='#x', text='hi')
+        result = integrations.call('github', 'create_issue', title='test', body='test')
         self.assertTrue(result.demo)

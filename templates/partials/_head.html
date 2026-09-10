@@ -1,24 +1,8 @@
 {% load static %}
-{% comment %}
-    Shared <head> content, included by both base.html and base_public.html so
-    the two shells can never drift apart.
-
-    Takes no include variables.
-{% endcomment %}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="AI Workforce: autonomous marketing employees with human approval.">
-
-{% comment %}
-    Applies the saved theme BEFORE the first paint, so the page never flashes
-    the wrong colours. This must stay inline and must stay above the
-    stylesheet links: an external file would add a network round trip during
-    which the browser would paint the default theme.
-
-    The is-preload class suppresses colour transitions for the first frame;
-    theme.js removes it once the page has settled.
-{% endcomment %}
+<meta name="description" content="AI Workforce: autonomous AI employees with human approval.">
 <script>
   (function () {
     var root = document.documentElement;
@@ -34,41 +18,12 @@
     }
   })();
 </script>
-
-{# Fonts. preconnect first so the font files start downloading sooner. #}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
-
-{# Icons #}
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
-{% comment %}
-    Stylesheets. THE ORDER IS SIGNIFICANT and is declared only here:
-
-      1. tokens      every design value; nothing else declares a colour
-      2. base        reset and bare element defaults
-      3. layout      the application shell and its breakpoints
-      4. components  the reusable UI library
-      5. pages       page-specific rules
-      6. workforce   the six-employee platform's shared additions
-      7. actions     the approval queue and the orchestrator console
-      8. platform    integrations, settings and the audit log
-      9. ops         the operational pages
-     10. utilities   last, so a utility class always wins
-
-    The four platform sheets are separate files rather than more of pages.css
-    because each one belongs to a distinct area of the application, and a
-    single sheet of four thousand lines is a sheet nobody edits with
-    confidence.
-{% endcomment %}
-<link rel="stylesheet" href="{% static 'css/tokens.css' %}">
-<link rel="stylesheet" href="{% static 'css/base.css' %}">
-<link rel="stylesheet" href="{% static 'css/layout.css' %}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="{% static 'css/tokens.css' %}?v=20260910-ui2">
+<link rel="stylesheet" href="{% static 'css/base.css' %}?v=20260910-ui2">
+<link rel="stylesheet" href="{% static 'css/layout.css' %}?v=20260910-ui2">
 <link rel="stylesheet" href="{% static 'css/components.css' %}">
-<link rel="stylesheet" href="{% static 'css/pages.css' %}">
+<link rel="stylesheet" href="{% static 'css/pages.css' %}?v=20260910-ui2">
 <link rel="stylesheet" href="{% static 'css/workforce.css' %}">
 <link rel="stylesheet" href="{% static 'css/actions.css' %}">
 <link rel="stylesheet" href="{% static 'css/platform.css' %}">

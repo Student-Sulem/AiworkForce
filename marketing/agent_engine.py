@@ -725,7 +725,8 @@ def _generate_reply(agent, conversation, latest_text, mailbox=None):
 
     Returns (text, source, model_label, tokens).
     """
-    if agent.has_live_llm:
+    from . import agent_runtime
+    if agent_runtime.live_llm_active(agent):
         history = _history_for(conversation)
         if mailbox and mailbox.get('facts'):
             history.append({'role': 'system', 'content': mailbox['facts']})

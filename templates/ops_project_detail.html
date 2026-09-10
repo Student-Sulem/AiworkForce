@@ -434,7 +434,7 @@
 
                 <p class="u-text-xs u-text-subtle u-mt-6 u-mb-0">
                     Recorded by
-                    {{ project.created_by_agent.name|default:project.created_by.username|default:"an unknown author" }}
+                    {% if project.created_by_agent %}{{ project.created_by_agent.name }}{% elif project.created_by %}{{ project.created_by.username }}{% else %}an unknown author{% endif %}
                     on {{ project.created_at|date:"j M Y" }}.
                 </p>
             </div>

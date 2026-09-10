@@ -13,26 +13,20 @@
     its own brand is not visible.
 {% endcomment %}
 <header class="topbar">
-    <button class="btn btn--ghost btn--icon topbar__hamburger" id="drawerToggle"
+    <button class="btn btn--ghost btn--icon" id="sidebarToggle"
             type="button" aria-expanded="false" aria-controls="appSidebar"
             aria-label="Open navigation">
         <i class="fa-solid fa-bars" aria-hidden="true"></i>
     </button>
 
-    <button class="btn btn--ghost btn--icon u-hide-mobile" id="sidebarCollapse"
-            type="button" aria-expanded="true" aria-controls="appSidebar"
-            aria-label="Collapse the sidebar">
-        <i class="fa-solid fa-bars-staggered" aria-hidden="true"></i>
-    </button>
-
-    <span class="topbar__title u-hide-desktop">AI Workforce</span>
+    <span class="topbar__title topbar__brand">AI Workforce</span>
 
     <div class="topbar__spacer"></div>
 
-    {% if nav_pending_count %}
-    <a href="{% url 'approvals' %}" class="badge badge--warning" title="Items awaiting review">
+    {% if nav_action_count %}
+    <a href="{% url 'actions' %}" class="badge badge--warning" title="Items awaiting review">
         <i class="fa-solid fa-clock" aria-hidden="true"></i>
-        {{ nav_pending_count }} pending
+        {{ nav_action_count }} pending
     </a>
     {% endif %}
 

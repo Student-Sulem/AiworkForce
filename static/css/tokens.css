@@ -1,77 +1,57 @@
-/* ==========================================================================
-   tokens.css -- the single source of truth for every design value.
-
-   Light is the default and lives on :root. Dark overrides only the colour
-   tokens under [data-theme="dark"], which an inline script in
-   partials/_head.html stamps on <html> before the first paint.
-
-   RULE: no other stylesheet may declare a colour on :root. If a value is
-   needed in two places, it belongs here as a custom property.
-
-   Load order matters. This file must be linked first.
-   ========================================================================== */
-
 :root {
   color-scheme: light;
 
-  /* --- Surfaces --------------------------------------------------------- */
-  --color-bg:            #f7f8fa;   /* the page canvas */
-  --color-surface:       #ffffff;   /* cards, sidebar, modals */
-  --color-surface-2:     #f1f3f7;   /* table headers, inset fills */
-  --color-surface-3:     #e8ebf0;   /* hover fills */
+  --color-bg:            #f5f5f7;
+  --color-surface:       #ffffff;
+  --color-surface-2:     #f2f2f5;
+  --color-surface-3:     #e8e8ed;
 
-  /* --- Borders ---------------------------------------------------------- */
-  --color-border:        #e2e5ea;
-  --color-border-strong: #cfd4dc;
+  --color-border:        #e5e5ea;
+  --color-border-strong: #d1d1d6;
 
-  /* --- Text ------------------------------------------------------------- */
-  --color-text:          #10141c;
-  --color-text-muted:    #5b6472;
-  --color-text-subtle:   #8a929f;
+  --color-text:          #1c1c1e;
+  --color-text-muted:    #636366;
+  --color-text-subtle:   #aeaeb2;
   --color-text-onaccent: #ffffff;
 
-  /* --- Primary accent --------------------------------------------------- */
-  --color-primary:        #4f46e5;
-  --color-primary-hover:  #4338ca;
-  --color-primary-soft:   #eef2ff;
-  --color-primary-border: #c7d2fe;
+  --color-primary:         #007aff;
+  --color-primary-hover:   #0066d6;
+  --color-primary-soft:    #ebf5ff;
+  --color-primary-border:  #b3d7ff;
 
-  /* --- Semantic: foreground / soft background / border ------------------ */
-  --color-success:        #047857;
-  --color-success-soft:   #ecfdf5;
-  --color-success-border: #a7f3d0;
-  --color-warning:        #b45309;
-  --color-warning-soft:   #fffbeb;
-  --color-warning-border: #fde68a;
-  --color-danger:         #b91c1c;
-  --color-danger-soft:    #fef2f2;
-  --color-danger-border:  #fecaca;
-  --color-info:           #0e7490;
-  --color-info-soft:      #ecfeff;
-  --color-info-border:    #a5f3fc;
-  --color-neutral:        #4b5563;
-  --color-neutral-soft:   #f3f4f6;
-  --color-neutral-border: #d1d5db;
+  --color-success:        #34c759;
+  --color-success-soft:   #e8f8ed;
+  --color-success-border:#a8e6b8;
+  --color-warning:        #ff9500;
+  --color-warning-soft:   #fff4e5;
+  --color-warning-border:#ffd699;
+  --color-danger:         #ff3b30;
+  --color-danger-soft:    #ffebea;
+  --color-danger-border: #ffb3ae;
+  --color-info:           #5ac8fa;
+  --color-info-soft:      #e6f7ff;
+  --color-info-border:    #b0e4ff;
+  --color-neutral:        #8e8e93;
+  --color-neutral-soft:   #f2f2f5;
+  --color-neutral-border:#d1d1d6;
 
-  --color-focus:   #4f46e5;
-  --color-overlay: rgba(16, 20, 28, 0.45);
+  --color-focus:   #007aff;
+  --color-overlay: rgba(28, 28, 30, 0.35);
 
-  /* --- Typography ------------------------------------------------------- */
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-               Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, 'SF Mono Regular', 'Menlo', monospace;
 
-  --fs-xs:   0.75rem;     /* 12px -- labels, captions */
-  --fs-sm:   0.8125rem;   /* 13px -- secondary text */
-  --fs-base: 0.875rem;    /* 14px -- body, tables, buttons */
-  --fs-md:   1rem;        /* 16px -- card titles */
-  --fs-lg:   1.125rem;    /* 18px -- section headings */
-  --fs-xl:   1.375rem;    /* 22px -- page title */
-  --fs-2xl:  1.75rem;     /* 28px -- KPI values */
-  --fs-3xl:  2.25rem;     /* 36px -- landing headline */
+  --fs-xs:   0.75rem;
+  --fs-sm:   0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-md:   1rem;
+  --fs-lg:   1.25rem;
+  --fs-xl:   1.5rem;
+  --fs-2xl:  2rem;
+  --fs-3xl:  2.5rem;
 
-  --lh-tight:   1.25;
-  --lh-normal:  1.5;
+  --lh-tight:   1.2;
+  --lh-normal:  1.45;
   --lh-relaxed: 1.65;
 
   --fw-regular:  400;
@@ -79,130 +59,108 @@
   --fw-semibold: 600;
   --fw-bold:     700;
 
-  /* --- Spacing, on a 4px base ------------------------------------------- */
   --sp-1: 0.25rem;  --sp-2: 0.5rem;   --sp-3: 0.75rem;  --sp-4: 1rem;
   --sp-5: 1.25rem;  --sp-6: 1.5rem;   --sp-8: 2rem;     --sp-10: 2.5rem;
   --sp-12: 3rem;    --sp-16: 4rem;
 
-  /* --- Radii ------------------------------------------------------------ */
-  --r-sm: 6px;  --r-md: 8px;  --r-lg: 12px;  --r-xl: 16px;  --r-full: 999px;
+  --r-sm: 6px;   --r-md: 10px;  --r-lg: 14px;  --r-xl: 18px;  --r-full: 999px;
 
-  /* --- Elevation -------------------------------------------------------- */
-  --shadow-xs: 0 1px 2px rgba(16, 20, 28, 0.04);
-  --shadow-sm: 0 1px 3px rgba(16, 20, 28, 0.06), 0 1px 2px rgba(16, 20, 28, 0.04);
-  --shadow-md: 0 4px 12px rgba(16, 20, 28, 0.08);
-  --shadow-lg: 0 12px 32px rgba(16, 20, 28, 0.12);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.1);
 
-  /* --- Layout ----------------------------------------------------------- */
-  --sidebar-w:      260px;
-  --sidebar-w-rail:  72px;
-  --topbar-h:        56px;
-  --content-max:   1280px;
+  --sidebar-w:      240px;
+  --sidebar-w-rail:  68px;
+  --topbar-h:        52px;
+  --content-max:   1200px;
 
-  /* --- Stacking --------------------------------------------------------- */
   --z-topbar: 90;  --z-sidebar: 100;  --z-overlay: 900;
   --z-drawer: 950; --z-modal: 1000;   --z-toast: 1100;
 
-  /* --- Motion ----------------------------------------------------------- */
-  --transition-fast: 120ms ease;
-  --transition:      180ms ease;
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition:      250ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-
-/* ==========================================================================
-   Dark theme. Only colour and shadow tokens are redefined; every size,
-   spacing and typography value is shared with the light theme.
-   ========================================================================== */
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --color-bg:            #0d1117;
-  --color-surface:       #151b24;
-  --color-surface-2:     #1c232e;
-  --color-surface-3:     #242c38;
+  --color-bg:            #000000;
+  --color-surface:       #1c1c1e;
+  --color-surface-2:     #2c2c2e;
+  --color-surface-3:     #3a3a3c;
 
-  --color-border:        #242c38;
-  --color-border-strong: #333c4a;
+  --color-border:        #38383a;
+  --color-border-strong: #48484a;
 
-  --color-text:          #e8ecf2;
-  --color-text-muted:    #9aa4b2;
-  --color-text-subtle:   #6b7480;
-  --color-text-onaccent: #0d1117;
+  --color-text:          #f2f2f7;
+  --color-text-muted:    #aeaeb2;
+  --color-text-subtle:   #636366;
+  --color-text-onaccent: #ffffff;
 
-  --color-primary:        #818cf8;
-  --color-primary-hover:  #a5b4fc;
-  --color-primary-soft:   #1e2333;
-  --color-primary-border: #3b3f6b;
+  --color-primary:         #0a84ff;
+  --color-primary-hover:   #409cff;
+  --color-primary-soft:    #1c2a3a;
+  --color-primary-border:  #153459;
 
-  --color-success:        #34d399;
-  --color-success-soft:   #0d2620;
-  --color-success-border: #14532d;
-  --color-warning:        #fbbf24;
-  --color-warning-soft:   #2a1f0a;
-  --color-warning-border: #78350f;
-  --color-danger:         #f87171;
-  --color-danger-soft:    #2a1315;
-  --color-danger-border:  #7f1d1d;
-  --color-info:           #22d3ee;
-  --color-info-soft:      #082f34;
-  --color-info-border:    #155e75;
-  --color-neutral:        #9ca3af;
-  --color-neutral-soft:   #1c232e;
-  --color-neutral-border: #374151;
+  --color-success:        #30d158;
+  --color-success-soft:   #1a2e1e;
+  --color-success-border:#1a5c2a;
+  --color-warning:        #ff9f0a;
+  --color-warning-soft:   #2e2212;
+  --color-warning-border:#593f0a;
+  --color-danger:         #ff453a;
+  --color-danger-soft:    #2e1515;
+  --color-danger-border:  #591f1c;
+  --color-info:           #64d2ff;
+  --color-info-soft:      #142a33;
+  --color-info-border:    #154e66;
+  --color-neutral:        #8e8e93;
+  --color-neutral-soft:   #2c2c2e;
+  --color-neutral-border:#48484a;
 
-  --color-focus:   #a5b4fc;
-  --color-overlay: rgba(0, 0, 0, 0.62);
+  --color-focus:   #0a84ff;
+  --color-overlay: rgba(0, 0, 0, 0.55);
 
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.40);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.4);
 }
-
-
-/* ==========================================================================
-   Operating-system preference, used only when no explicit choice is stored.
-
-   The :not([data-theme]) guard is essential. Without it, someone who has
-   deliberately chosen Light on a dark-mode machine would be forced back to
-   dark. In practice the inline head script always stamps data-theme, so this
-   block matters only for the very first paint or when JavaScript is off.
-   ========================================================================== */
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --color-bg:            #0d1117;
-    --color-surface:       #151b24;
-    --color-surface-2:     #1c232e;
-    --color-surface-3:     #242c38;
-    --color-border:        #242c38;
-    --color-border-strong: #333c4a;
-    --color-text:          #e8ecf2;
-    --color-text-muted:    #9aa4b2;
-    --color-text-subtle:   #6b7480;
-    --color-text-onaccent: #0d1117;
-    --color-primary:       #818cf8;
-    --color-primary-hover: #a5b4fc;
-    --color-primary-soft:  #1e2333;
-    --color-primary-border:#3b3f6b;
-    --color-success:       #34d399;
-    --color-success-soft:  #0d2620;
-    --color-success-border:#14532d;
-    --color-warning:       #fbbf24;
-    --color-warning-soft:  #2a1f0a;
-    --color-warning-border:#78350f;
-    --color-danger:        #f87171;
-    --color-danger-soft:   #2a1315;
-    --color-danger-border: #7f1d1d;
-    --color-info:          #22d3ee;
-    --color-info-soft:     #082f34;
-    --color-info-border:   #155e75;
-    --color-neutral:       #9ca3af;
-    --color-neutral-soft:  #1c232e;
-    --color-neutral-border:#374151;
-    --color-focus:         #a5b4fc;
-    --color-overlay:       rgba(0, 0, 0, 0.62);
+    --color-bg:            #000000;
+    --color-surface:       #1c1c1e;
+    --color-surface-2:     #2c2c2e;
+    --color-surface-3:     #3a3a3c;
+    --color-border:        #38383a;
+    --color-border-strong: #48484a;
+    --color-text:          #f2f2f7;
+    --color-text-muted:    #aeaeb2;
+    --color-text-subtle:   #636366;
+    --color-text-onaccent: #ffffff;
+    --color-primary:        #0a84ff;
+    --color-primary-hover:  #409cff;
+    --color-primary-soft:   #1c2a3a;
+    --color-primary-border: #153459;
+    --color-success:       #30d158;
+    --color-success-soft:  #1a2e1e;
+    --color-success-border:#1a5c2a;
+    --color-warning:       #ff9f0a;
+    --color-warning-soft:  #2e2212;
+    --color-warning-border:#593f0a;
+    --color-danger:        #ff453a;
+    --color-danger-soft:   #2e1515;
+    --color-danger-border: #591f1c;
+    --color-info:          #64d2ff;
+    --color-info-soft:     #142a33;
+    --color-info-border:   #154e66;
+    --color-neutral:       #8e8e93;
+    --color-neutral-soft:  #2c2c2e;
+    --color-neutral-border:#48484a;
+    --color-focus:         #0a84ff;
+    --color-overlay:       rgba(0, 0, 0, 0.55);
   }
 }

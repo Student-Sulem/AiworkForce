@@ -276,7 +276,7 @@
                     <div class="datalist__row">
                         <span class="datalist__key">Added by</span>
                         <span class="datalist__value">
-                            {{ document.created_by_agent.name|default:document.created_by.username|default:"Unknown" }}
+                            {% if document.created_by_agent %}{{ document.created_by_agent.name }}{% elif document.created_by %}{{ document.created_by.username }}{% else %}Unknown{% endif %}
                         </span>
                     </div>
                     <div class="datalist__row">

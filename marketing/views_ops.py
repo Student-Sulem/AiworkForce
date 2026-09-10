@@ -421,7 +421,7 @@ def people_view(request):
     if status_filter != 'all' and status_filter in dict(Employee.STATUS_CHOICES):
         people = people.filter(employment_status=status_filter)
 
-    paginator = Paginator(people, 25)
+    paginator = Paginator(people.order_by('full_name'), 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
     onboarding = list(Employee.objects
@@ -998,7 +998,7 @@ def knowledge_view(request):
         documents = documents.filter(
             Q(title__icontains=search_query) | Q(content__icontains=search_query))
 
-    paginator = Paginator(documents, 20)
+    paginator = Paginator(documents.order_by('title'), 20)
     page_obj = paginator.get_page(request.GET.get('page'))
 
     stats = {}

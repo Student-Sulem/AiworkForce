@@ -1,434 +1,72 @@
 {% extends 'base.html' %}
 {% load static %}
-{% comment %}
-    OPERATIONS -- Support.
-    Rendered by marketing.views_ops.support_view at the URL named 'ops_support'.
-
-    STRUCTURE
-      1. four figures      open, urgent, breaching SLA, resolved this week
-      2. the human flag    a banner counting the tickets no AI may reply to
-      3. filters           status, priority, category, customer, free text
-      4. the queue         a dense table, with the SLA indicator loud when the
-                           promise has already been broken
-      5. urgent complaints a panel
-      6. recurring         tags carried by more than one open ticket
-      7. reports           the computed accounts, with their figures kept
-
-    WHY needs_human GETS A BANNER, A ROW OF ITS OWN AND A COUNT IN THE HEADER
-    The field is set for a data breach, a legal threat, a safety issue, a
-    vulnerable customer, a media enquiry. The drafting and sending tools read it
-    and refuse to act, but the interface has the other half of the job: telling
-    a person that a person is required. A quiet pill in a row of nine columns
-    would be missed exactly when being missed matters most, so the flagged
-    ticket gets a full-width band immediately above its own row.
-{% endcomment %}
-
 {% block title %}Support | AI Workforce{% endblock %}
-{% block body_class %}page-ops page-ops-support{% endblock %}
+{% block body_class %}page-ops{% endblock %}
 {% block page_title %}Customer Support{% endblock %}
-{% block page_subtitle %}
-    Every ticket, how it was triaged by {{ employee_name }}, and which ones a person
-    must answer themselves.
-{% endblock %}
-
-{% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/ops.css' %}">
-{% endblock %}
-
-{% block page_actions %}
-    {% if employee %}
-    <a href="{% url 'employee_profile' employee.agent_type %}" class="btn btn--secondary">
-        <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
-        {{ employee.name }}
-    </a>
-    {% endif %}
-    <a href="{% url 'agents' %}" class="btn btn--primary">
-        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask for a triage
-    </a>
-{% endblock %}
+{% block page_subtitle %}Tickets, triage and customer replies.{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/ops.css' %}">{% endblock %}
 
 {% block content %}
-{% url 'agents' as agents_url %}
-
-<!-- 1. Headline figures -------------------------------------------------- -->
 <div class="grid grid-kpi u-mb-6">
-    {% include 'partials/_kpi_tile.html' with label="Open tickets" value=open_tickets icon="fa-inbox" tone="primary" meta="Somebody still owes a reply" %}
-    {% include 'partials/_kpi_tile.html' with label="Urgent" value=urgent_tickets icon="fa-fire" tone="danger" meta="Priority set from impact" %}
-    {% include 'partials/_kpi_tile.html' with label="Breaching SLA" value=breaching_count icon="fa-stopwatch" tone="warning" meta="Response target already passed" %}
-    {% include 'partials/_kpi_tile.html' with label="Resolved this week" value=resolved_this_week icon="fa-circle-check" tone="success" meta="Last seven days" %}
+    {% include 'partials/_kpi_tile.html' with label="Open tickets" value=open_tickets icon="fa-ticket" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Urgent" value=urgent_tickets icon="fa-triangle-exclamation" tone="danger" %}
+    {% include 'partials/_kpi_tile.html' with label="Breaching SLA" value=breaching_count icon="fa-clock" tone="warning" %}
+    {% include 'partials/_kpi_tile.html' with label="Resolved this week" value=resolved_this_week icon="fa-circle-check" tone="success" %}
 </div>
 
-<!-- 2. The human flag ---------------------------------------------------- -->
 {% if needs_human_count %}
-<div class="needs-human u-mb-6">
-    <span class="needs-human__icon"><i class="fa-solid fa-hand" aria-hidden="true"></i></span>
-    <div class="u-grow">
-        <p class="needs-human__title">
-            {{ needs_human_count }} open ticket{{ needs_human_count|pluralize }}
-            must be answered by a person
-        </p>
-        <p class="needs-human__body">
-            These are marked <code>needs_human</code>. No AI employee will draft or propose a
-            reply while that flag is set, whatever it is asked to do, and nothing the model
-            says can clear it -- only a person changing the record can. They are banded in
-            the queue below.
-        </p>
-    </div>
+<div class="alert alert--danger u-mb-4">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    <span><strong>{{ needs_human_count }} ticket{{ needs_human_count|pluralize }} need a person.</strong> These are flagged and will not receive an AI-drafted reply.</span>
 </div>
 {% endif %}
 
-<!-- 3. Filters ----------------------------------------------------------- -->
-<form class="toolbar" method="get" action="{% url 'ops_support' %}">
-    <div class="toolbar__search">
-        <label class="sr-only" for="ticketSearch">Search tickets</label>
-        <input class="form-input" id="ticketSearch" type="search" name="q"
-               value="{{ search_query }}"
-               placeholder="Search by reference, subject, body or address">
-    </div>
-    <div class="toolbar__filters">
-        <label class="sr-only" for="ticketStatusFilter">Filter by status</label>
-        <select class="form-select" id="ticketStatusFilter" name="status">
-            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open tickets</option>
-            <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Resolved and closed</option>
-            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>Every ticket</option>
-            {% for value, label in status_choices %}
-            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="sr-only" for="ticketPriorityFilter">Filter by priority</label>
-        <select class="form-select" id="ticketPriorityFilter" name="priority">
-            <option value="all" {% if priority_filter == 'all' %}selected{% endif %}>Any priority</option>
-            {% for value, label in priority_choices %}
-            <option value="{{ value }}" {% if priority_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="sr-only" for="ticketCategoryFilter">Filter by category</label>
-        <select class="form-select" id="ticketCategoryFilter" name="category">
-            <option value="all" {% if category_filter == 'all' %}selected{% endif %}>Any category</option>
-            {% for value, label in category_choices %}
-            <option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="sr-only" for="ticketCustomerFilter">Filter by customer</label>
-        <select class="form-select" id="ticketCustomerFilter" name="customer">
-            <option value="all" {% if customer_filter == 'all' %}selected{% endif %}>Any customer</option>
-            {% for pk, name in customer_choices %}
-            <option value="{{ pk }}" {% if customer_filter == pk|stringformat:"s" %}selected{% endif %}>{{ name }}</option>
-            {% endfor %}
-        </select>
-
-        <button class="btn btn--secondary" type="submit">
-            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
-        </button>
-        {% if has_filters %}
-        <a class="btn btn--ghost" href="{% url 'ops_support' %}">Clear</a>
-        {% endif %}
-    </div>
-</form>
-
-<!-- 4. The queue --------------------------------------------------------- -->
-<section class="card u-mb-6">
+<section class="card">
     <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-list-ul" aria-hidden="true"></i> The queue
-            </h2>
-            <p class="card__subtitle">
-                Priority is derived from impact rather than tone. Open a ticket to read the
-                phrases from the customer that drove it.
-            </p>
-        </div>
+        <h2 class="card__title"><i class="fa-solid fa-ticket"></i> Tickets</h2>
+        <form class="u-flex u-gap-2 u-wrap" method="get">
+            <input class="form-input" type="search" name="q" value="{{ search_query }}" placeholder="Search tickets" style="width:190px;">
+            <select class="form-select" name="status" style="width:120px;">
+                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                {% for v, l in status_choices %}<option value="{{ v }}" {% if status_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+            </select>
+            <select class="form-select" name="priority" style="width:120px;">
+                <option value="all" {% if priority_filter == 'all' %}selected{% endif %}>Priority</option>
+                {% for v, l in priority_choices %}<option value="{{ v }}" {% if priority_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+            </select>
+            <select class="form-select" name="category" style="width:130px;">
+                <option value="all" {% if category_filter == 'all' %}selected{% endif %}>Category</option>
+                {% for v, l in category_choices %}<option value="{{ v }}" {% if category_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+            </select>
+            <button class="btn btn--secondary btn--sm" type="submit">Filter</button>
+            {% if has_filters %}<a class="btn btn--ghost btn--sm" href="{% url 'ops_support' %}">Clear</a>{% endif %}
+        </form>
     </div>
     <div class="card__body card__body--flush">
-        {% if tickets %}
         <div class="table-wrap">
-            <table class="table table--stack">
-                <thead>
-                    <tr>
-                        <th scope="col">Reference</th>
-                        <th scope="col">Subject</th>
-                        <th scope="col">Customer</th>
-                        <th scope="col">Category</th>
-                        <th scope="col">Priority</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Sentiment</th>
-                        <th scope="col">Age</th>
-                        <th scope="col">SLA</th>
-                        {% if can_manage %}<th scope="col">Change status</th>{% endif %}
-                    </tr>
-                </thead>
+            <table class="table">
+                <thead><tr><th>Ref</th><th>Subject</th><th>Customer</th><th>Category</th><th>Priority</th><th>Status</th><th>Age</th><th></th></tr></thead>
                 <tbody>
-                    {% for ticket in tickets %}
-
-                    {% if ticket.needs_human %}
-                    <tr class="flag-row">
-                        <td colspan="{% if can_manage %}10{% else %}9{% endif %}">
-                            <span class="flag-row__text">
-                                <i class="fa-solid fa-hand" aria-hidden="true"></i>
-                                {{ ticket.reference }} needs a person. No AI employee will
-                                draft or send a reply to this ticket.
-                            </span>
-                        </td>
+                    {% for t in page_obj %}
+                    <tr {% if t.needs_human %}style="background:var(--color-danger-soft);"{% endif %}>
+                        <td class="u-mono u-text-xs">{{ t.reference }}{% if t.needs_human %} <i class="fa-solid fa-user" title="Needs a person" style="color:var(--color-danger);"></i>{% endif %}</td>
+                        <td><a href="{% url 'ops_ticket' t.pk %}">{{ t.subject|truncatechars:55 }}</a></td>
+                        <td class="u-text-xs">{{ t.customer.name|default:"-" }}</td>
+                        <td><span class="chip">{{ t.get_category_display|default:t.category }}</span></td>
+                        <td><span class="prio prio--{{ t.priority }}">{{ t.get_priority_display }}</span></td>
+                        <td>{% include 'partials/_status_badge.html' with status=t.status label=t.get_status_display %}</td>
+                        <td class="u-text-xs u-text-muted">{{ t.created_at|timesince }} ago</td>
+                        <td class="table__actions"><a href="{% url 'ops_ticket' t.pk %}" class="btn btn--ghost btn--xs">View</a></td>
                     </tr>
-                    {% endif %}
-
-                    <tr {% if ticket.needs_human %}class="row--flagged"{% endif %}>
-                        <td data-label="Reference">
-                            <a class="u-mono u-semibold" href="{% url 'ops_ticket' ticket.pk %}">
-                                {{ ticket.reference }}
-                            </a>
-                            {% if ticket.duplicate_of_id %}
-                            <span class="u-text-xs u-text-subtle" style="display:block;">
-                                duplicate of
-                                <a href="{% url 'ops_ticket' ticket.duplicate_of.pk %}">{{ ticket.duplicate_of.reference }}</a>
-                            </span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Subject">
-                            <a href="{% url 'ops_ticket' ticket.pk %}">
-                                {{ ticket.subject|truncatechars:64 }}
-                            </a>
-                            <span class="u-text-xs u-text-subtle" style="display:block;">
-                                {{ ticket.get_channel_display }}
-                                &middot; {{ ticket.message_count }} message{{ ticket.message_count|pluralize }}
-                            </span>
-                        </td>
-                        <td data-label="Customer">
-                            {{ ticket.customer_label|truncatechars:34 }}
-                            {% if ticket.customer.is_priority %}
-                            <span class="badge badge--info">{{ ticket.customer.get_tier_display }}</span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Category">{{ ticket.get_category_display }}</td>
-                        <td data-label="Priority">
-                            <span class="prio prio--{{ ticket.priority }}">
-                                {{ ticket.get_priority_display }}
-                            </span>
-                        </td>
-                        <td data-label="Status">
-                            <span id="ticketStatus{{ ticket.pk }}">
-                                {% include 'partials/_status_badge.html' with status=ticket.status label=ticket.get_status_display %}
-                            </span>
-                        </td>
-                        <td data-label="Sentiment">
-                            <span class="badge badge--{% if ticket.sentiment == 'angry' %}danger{% elif ticket.sentiment == 'negative' %}warning{% elif ticket.sentiment == 'positive' %}success{% else %}neutral{% endif %}">
-                                {{ ticket.get_sentiment_display }}
-                            </span>
-                        </td>
-                        <td data-label="Age">{{ ticket.age_label }}</td>
-                        <td data-label="SLA">
-                            {% if ticket.is_breaching_sla %}
-                            <span class="sla sla--breach">
-                                <i class="fa-solid fa-stopwatch" aria-hidden="true"></i>
-                                Breached {{ ticket.sla_due_at|timesince }} ago
-                            </span>
-                            {% elif ticket.sla_due_at %}
-                            <span class="sla sla--ok">
-                                Due {{ ticket.sla_due_at|date:"j M H:i" }}
-                            </span>
-                            {% else %}
-                            <span class="sla sla--none">No target set</span>
-                            {% endif %}
-                        </td>
-                        {% if can_manage %}
-                        <td data-label="Change status">
-                            <label class="sr-only" for="ticketSelect{{ ticket.pk }}">
-                                Change the status of {{ ticket.reference }}
-                            </label>
-                            <select class="form-select inline-select" id="ticketSelect{{ ticket.pk }}"
-                                    data-ops-url="{% url 'api_ops_update' %}"
-                                    data-ops-model="ticket"
-                                    data-ops-id="{{ ticket.pk }}"
-                                    data-ops-field="status"
-                                    data-ops-current="{{ ticket.status }}"
-                                    data-ops-display="#ticketStatus{{ ticket.pk }}">
-                                {% for value, label in status_choices %}
-                                <option value="{{ value }}" {% if ticket.status == value %}selected{% endif %}>{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </td>
-                        {% endif %}
-                    </tr>
+                    {% empty %}
+                    <tr><td colspan="8" class="u-text-center u-text-muted">No tickets match your filters.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-        {% else %}
-        <div class="card__body">
-            {% include 'partials/_empty_state.html' with icon="fa-inbox" title="No tickets match" message="Ask Customer Support to triage an incoming request, or clear the filters. Triage sets the category, the priority and the sentiment from keyword rules, and stores the customer's own phrases that drove the decision." action_url=agents_url action_label="Talk to Customer Support" %}
-        </div>
-        {% endif %}
-    </div>
-</section>
-
-{% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
-
-<div class="grid grid-2 u-mb-6">
-
-    <!-- 5. Urgent complaints --------------------------------------------- -->
-    <section class="card">
-        <div class="card__header">
-            <div>
-                <h2 class="card__title">
-                    <i class="fa-solid fa-fire" aria-hidden="true"></i> Urgent and angry
-                </h2>
-                <p class="card__subtitle">Open, and either urgent, angry or a complaint.</p>
-            </div>
-        </div>
-        <div class="card__body card__body--flush">
-            {% if urgent_complaints %}
-            <div class="table-wrap">
-                <table class="table table--stack">
-                    <thead>
-                        <tr>
-                            <th scope="col">Ticket</th>
-                            <th scope="col">Why it is here</th>
-                            <th scope="col">Age</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for ticket in urgent_complaints %}
-                        <tr {% if ticket.needs_human %}class="row--flagged"{% endif %}>
-                            <td data-label="Ticket">
-                                <a href="{% url 'ops_ticket' ticket.pk %}">
-                                    <span class="u-mono">{{ ticket.reference }}</span>
-                                    {{ ticket.subject|truncatechars:44 }}
-                                </a>
-                                <span class="u-text-xs u-text-subtle" style="display:block;">
-                                    {{ ticket.customer_label|truncatechars:34 }}
-                                </span>
-                            </td>
-                            <td data-label="Why it is here">
-                                <span class="u-flex u-gap-2 u-wrap">
-                                    {% if ticket.needs_human %}
-                                    <span class="badge badge--danger">Needs a person</span>
-                                    {% endif %}
-                                    <span class="prio prio--{{ ticket.priority }}">
-                                        {{ ticket.get_priority_display }}
-                                    </span>
-                                    <span class="chip">{{ ticket.get_sentiment_display }}</span>
-                                    <span class="chip">{{ ticket.get_category_display }}</span>
-                                </span>
-                            </td>
-                            <td data-label="Age">{{ ticket.age_label }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="card__body">
-                {% include 'partials/_empty_state.html' with icon="fa-face-smile" title="Nothing urgent open" message="No open ticket is urgent, angry or logged as a complaint. Ask Customer Support for a sentiment report if you would like that in writing." %}
-            </div>
-            {% endif %}
-        </div>
-    </section>
-
-    <!-- 6. Recurring problems ------------------------------------------- -->
-    <section class="card">
-        <div class="card__header">
-            <div>
-                <h2 class="card__title">
-                    <i class="fa-solid fa-repeat" aria-hidden="true"></i> Recurring problems
-                </h2>
-                <p class="card__subtitle">
-                    Tags carried by two or more open tickets. The same fault spelled three
-                    ways is three signals nobody counts, which is why the tag is a row.
-                </p>
-            </div>
-        </div>
-        <div class="card__body card__body--flush">
-            {% if recurring_tags %}
-            <div class="table-wrap">
-                <table class="table table--stack">
-                    <thead>
-                        <tr>
-                            <th scope="col">Tag</th>
-                            <th scope="col">What it means</th>
-                            <th scope="col">Open tickets</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for tag in recurring_tags %}
-                        <tr>
-                            <td data-label="Tag">
-                                <a href="?status=open&q={{ tag.name }}" class="chip chip--mono">
-                                    {{ tag.name }}
-                                </a>
-                            </td>
-                            <td data-label="What it means">
-                                {{ tag.description|default:"No description recorded" }}
-                            </td>
-                            <td data-label="Open tickets">
-                                <span class="badge badge--warning">{{ tag.open_count }}</span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="card__body">
-                {% include 'partials/_empty_state.html' with icon="fa-tag" title="No pattern yet" message="No tag is carried by more than one open ticket. Ask Customer Support for a recurring-problems report: repeated tickets are a product signal, and reporting them is part of the job." action_url=agents_url action_label="Talk to Customer Support" %}
-            </div>
-            {% endif %}
-        </div>
-    </section>
-</div>
-
-<!-- 7. Reports ----------------------------------------------------------- -->
-<section class="card">
-    <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-chart-column" aria-hidden="true"></i> Support reports
-            </h2>
-            <p class="card__subtitle">
-                The figures are kept apart from the prose, so one report can be compared
-                with the next.
-            </p>
-        </div>
-    </div>
-    <div class="card__body stack">
-        {% for report in reports %}
-        <article class="card">
-            <div class="card__header">
-                <div>
-                    <h3 class="card__title">{{ report.title }}</h3>
-                    <p class="card__subtitle">
-                        {{ report.get_kind_display }}
-                        &middot; {{ report.period_label }}
-                        &middot; written {{ report.created_at|date:"j M Y" }}
-                        by {{ report.created_by_agent.name|default:"an unknown author" }}
-                    </p>
-                </div>
-            </div>
-            <div class="card__body">
-                {% if report.body %}
-                <div class="scroll-panel" tabindex="0" role="region"
-                     aria-label="{{ report.title }}">{{ report.body }}</div>
-                {% endif %}
-                {% if report.metrics %}
-                <p class="factlist__key u-mt-4">Computed figures</p>
-                <div class="chip-set">
-                    {% for key, value in report.metrics.items %}
-                    <span class="chip chip--mono">{{ key }}: {{ value }}</span>
-                    {% endfor %}
-                </div>
-                {% endif %}
-            </div>
-        </article>
-        {% empty %}
-        {% include 'partials/_empty_state.html' with icon="fa-file-lines" title="No reports yet" message="Ask Customer Support for a volume, resolution, SLA or recurring-problems report. It computes the figures and keeps them beside the reading of them." action_url=agents_url action_label="Talk to Customer Support" %}
-        {% endfor %}
+        {% include 'partials/_pagination.html' with page=page_obj %}
     </div>
 </section>
 {% endblock %}
 
-
-{% block extra_js %}
-<script src="{% static 'js/ops.js' %}" defer></script>
-{% endblock %}
+{% block extra_js %}<script src="{% static 'js/ops.js' %}" defer></script>{% endblock %}

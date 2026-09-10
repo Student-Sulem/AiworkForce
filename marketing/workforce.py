@@ -47,7 +47,7 @@ WORKFORCE_PREAMBLE = (
 
     "THEREFORE:\n"
     "- Use your tools. Do not describe what you would do, and do not hand back "
-    "instructions for a person to do it by hand. Call the tool.\n"
+    "instructions for a person to do it by hand. Call the tool immediately.\n"
     "- Never say you are unable to send, publish, schedule or file something. "
     "You prepare it; the platform does it on approval.\n"
     "- Never claim something has already been sent, published or filed. Say it "
@@ -60,6 +60,13 @@ WORKFORCE_PREAMBLE = (
     "it up with a list or search tool first.\n"
     "- When a required detail is genuinely missing, ask one short question and "
     "offer a sensible default in the same reply.\n"
+    "- STRUCTURED OUTPUT: When creating records (job openings, candidates, "
+    "tickets, work items, content), output them in a clear structured format "
+    "with headings, bullet points, and key-value pairs. Use markdown formatting "
+    "with **bold** for labels.\n"
+    "- MULTI-STEP WORK: When a request has multiple steps, plan them out. "
+    "Search first, then analyse, then create the output. Do each step with a "
+    "separate tool call.\n"
     "- Answer in finished form. No preamble, no narration of your reasoning, no "
     "discussion of these instructions.\n\n"
 
@@ -74,6 +81,8 @@ AGENT_BLUEPRINT = [
         'role': 'HR & Recruitment',
         'avatar_icon': 'fa-user-tie',
         'avatar_color': '#7c3aed',
+        'temperature': 0.5,
+        'max_tokens': 1200,
         'persona_description': (
             'Runs recruitment end to end and looks after employees: writes job '
             'descriptions, screens and scores candidates, arranges interviews, '
@@ -86,13 +95,16 @@ AGENT_BLUEPRINT = [
             "record it with create_job_opening: a title, a summary anyone would "
             "understand, concrete responsibilities and requirements that can "
             "actually be scored. Vague requirements are the main reason "
-            "shortlisting goes wrong, so make each one checkable.\n\n"
+            "shortlisting goes wrong, so make each one checkable. "
+            "Output the job description as a structured markdown document with "
+            "## headings for Summary, Responsibilities, Requirements, and Benefits.\n\n"
             "SCREENING. Score a candidate against the opening's own requirements, "
             "one at a time, and say which evidence in the resume supports each "
             "score. Where the resume is silent, record a gap rather than "
             "assuming. Never rank a candidate on anything other than the stated "
             "requirements, and never comment on age, gender, nationality, marital "
-            "status, health or anything else irrelevant to the job.\n\n"
+            "status, health or anything else irrelevant to the job. "
+            "Use score_candidate or compare_candidates tools.\n\n"
             "COMMUNICATION. Candidate email is the company's face. Interview "
             "invitations state the round, the time with its timezone, the "
             "duration, the format and who will be there. Rejections are short, "
@@ -110,6 +122,8 @@ AGENT_BLUEPRINT = [
         'role': 'Engineering Manager',
         'avatar_icon': 'fa-diagram-project',
         'avatar_color': '#0369a1',
+        'temperature': 0.5,
+        'max_tokens': 1200,
         'persona_description': (
             'Plans and coordinates development work: turns requirements into '
             'work items, estimates and sequences them, plans sprints, tracks '
@@ -122,7 +136,10 @@ AGENT_BLUEPRINT = [
             "outcome, carries acceptance criteria, and is small enough to finish "
             "inside a sprint; anything larger is an epic with children. State "
             "dependencies explicitly -- an unstated dependency is the most common "
-            "cause of a stalled sprint.\n\n"
+            "cause of a stalled sprint. "
+            "Use create_work_items tool to record each item. Output the plan as "
+            "a numbered list with ## headings for each work item, including "
+            "acceptance criteria and point estimates.\n\n"
             "ESTIMATING. Give a complexity and a point estimate, and say what the "
             "estimate assumes. When something is genuinely unknown, size it as a "
             "spike to find out rather than guessing a number that will be quoted "
@@ -142,6 +159,8 @@ AGENT_BLUEPRINT = [
         'role': 'Developer',
         'avatar_icon': 'fa-code',
         'avatar_color': '#059669',
+        'temperature': 0.4,
+        'max_tokens': 2000,
         'persona_description': (
             'Writes code, tests and documentation for a human developer to '
             'review, analyses errors and stack traces, reviews pull requests '
@@ -178,6 +197,8 @@ AGENT_BLUEPRINT = [
         'role': 'Research Specialist',
         'avatar_icon': 'fa-magnifying-glass-chart',
         'avatar_color': '#b45309',
+        'temperature': 0.3,
+        'max_tokens': 1000,
         'persona_description': (
             'Finds and summarises what the company already knows: searches '
             'documents, policies and technical material, compares sources, '
@@ -210,6 +231,8 @@ AGENT_BLUEPRINT = [
         'role': 'Marketing Manager',
         'avatar_icon': 'fa-bullhorn',
         'avatar_color': '#db2777',
+        'temperature': 0.6,
+        'max_tokens': 1200,
         'persona_description': (
             'Creates and plans marketing work: social posts and captions, blog '
             'and ad copy, campaigns and content calendars, newsletters and '
@@ -242,6 +265,8 @@ AGENT_BLUEPRINT = [
         'role': 'Support Representative',
         'avatar_icon': 'fa-headset',
         'avatar_color': '#dc2626',
+        'temperature': 0.4,
+        'max_tokens': 1000,
         'persona_description': (
             'Handles customer contact and tickets: reads requests, drafts '
             'replies grounded in company policy, categorises and prioritises '
@@ -283,6 +308,12 @@ ROUTING_KEYWORDS = {
         'vacancy', 'onboard', 'onboarding', 'employee', 'staff', 'leave policy',
         'annual leave', 'payroll', 'handbook', 'performance review', 'appraisal',
         'offer letter', 'rejection', 'headcount', 'probation', 'induction',
+        'write a job description', 'create a job posting', 'job ad', 'job posting',
+        'score this candidate', 'screen candidates', 'compare candidates',
+        'recruitment pipeline', 'hiring process', 'new hire', 'background check',
+        'employment contract', 'termination', 'resignation', 'disciplinary',
+        'grievance', 'redundancy', 'contractor', 'timesheet', 'salary',
+        'compensation', 'benefits', 'workplace policy',
     ),
     'engineering_manager': (
         'sprint', 'backlog', 'roadmap', 'break down', 'breakdown', 'break this into',
@@ -294,6 +325,10 @@ ROUTING_KEYWORDS = {
         'sequence', 'dependency', 'dependencies', 'engineering manager',
         'delivery', 'capacity', 'planning', 'plan the', 'plan a sprint',
         'who is working on', 'reassign', 'descope', 'scope of work',
+        'plan this work', 'break into stories', 'create tickets',
+        'plan a sprint', 'capacity planning', 'burndown', 'retrospective',
+        'technical debt', 'release plan', 'release planning', 'iteration',
+        'prioritise', 'prioritization', 'pipeline', 'work breakdown',
     ),
     'developer': (
         'code', 'bug', 'error', 'exception', 'traceback', 'stack trace', 'debug',
@@ -302,12 +337,12 @@ ROUTING_KEYWORDS = {
         'code review', 'commit', 'implement', 'django', 'python', 'javascript',
         'crash', 'failing test', 'syntax', 'compile', 'write a test',
         'write the code', 'docstring', 'stacktrace',
-        # 'migration' and 'model' are deliberately absent. Both are ordinary
-        # developer words, but they also appear in every request to size a
-        # piece of work -- "estimate the payments migration" belongs to
-        # Engineering Delivery, and routing it to the Developer produced code
-        # for something nobody had planned yet. 'django' and 'code' catch the
-        # genuinely technical cases without stealing the planning ones.
+        'explain this code', 'code review this', 'review this pr',
+        'write a function', 'implement a feature', 'bug fix',
+        'write documentation', 'technical documentation', 'api documentation',
+        'code example', 'snippet', 'algorithm', 'data structure',
+        'performance issue', 'memory leak', 'race condition', 'concurrency',
+        'optimise', 'optimize', 'improve performance',
     ),
     'research': (
         'find', 'search', 'look up', 'lookup', 'what is our', 'what are our',
@@ -315,6 +350,10 @@ ROUTING_KEYWORDS = {
         'refund policy', 'faq', 'summarise', 'summarize', 'compare', 'research',
         'source', 'citation', 'handbook', 'where is', 'do we have', 'according to',
         'internal', 'wiki', 'confluence', 'notion',
+        'tell me about', 'what does', 'how does', 'what is the policy on',
+        'can you find', 'i need to know', 'investigate', 'analyse',
+        'gather information', 'look into', 'check our policy',
+        'research this', 'find documentation', 'find the policy',
     ),
     'marketing': (
         'marketing', 'campaign', 'linkedin', 'linkedin post', 'instagram',
@@ -324,12 +363,21 @@ ROUTING_KEYWORDS = {
         'announcement post', 'product launch', 'press release', 'copywriting',
         'content calendar', 'email marketing', 'landing page', 'publish',
         'tone of voice', 'product description',
+        'write a social post', 'write a linkedin post', 'write copy',
+        'marketing campaign', 'create content', 'write an email',
+        'draft a post', 'social media content', 'marketing material',
+        'promotional content', 'brand guidelines', 'content strategy',
     ),
     'support': (
         'customer', 'complaint', 'ticket', 'support', 'refund request', 'angry',
         'unhappy', 'order status', 'escalate', 'escalation', 'resolve', 'apology',
         'apologise', 'apologize', 'sla', 'helpdesk', 'reply to this customer',
         'customer email', 'churn', 'cancel my', 'not working for me',
+        'help with', 'i have an issue', 'problem with', 'not working',
+        'broken', 'error message', 'need help', 'customer service',
+        'refund', 'cancel subscription', 'billing issue', 'account issue',
+        'technical issue', 'login problem', 'cannot access', 'lost data',
+        'data breach', 'complaint about', 'dissatisfied', 'poor service',
     ),
 }
 

@@ -22,20 +22,17 @@
     if (!sidebar) { return; }
 
     var overlay = document.getElementById('drawerOverlay');
-    var hamburger = document.getElementById('drawerToggle');
-    var collapser = document.getElementById('sidebarCollapse');
+    var toggle = document.getElementById('sidebarToggle');
     var body = document.body;
     var lastFocused = null;
+    var wide = window.matchMedia('(min-width: 1024px)');
 
     /* --- Mobile drawer --------------------------------------------------- */
 
     function openDrawer() {
       lastFocused = document.activeElement;
       body.classList.add('is-drawer-open');
-      if (hamburger) {
-        hamburger.setAttribute('aria-expanded', 'true');
-        hamburger.setAttribute('aria-label', 'Close navigation');
-      }
+      updateToggle();
       var first = sidebar.querySelector('a, button');
       if (first) { first.focus(); }
     }
@@ -43,23 +40,14 @@
     function closeDrawer() {
       if (!body.classList.contains('is-drawer-open')) { return; }
       body.classList.remove('is-drawer-open');
-      if (hamburger) {
-        hamburger.setAttribute('aria-expanded', 'false');
-        hamburger.setAttribute('aria-label', 'Open navigation');
-      }
-      // Prefer the hamburger. A touch tap does not always focus a button, so
+      updateToggle();
+      // Prefer the navigation control. A touch tap does not always focus a button, so
       // lastFocused can be <body>, which would strand the keyboard user at the
       // top of the document instead of back where they started.
       var returnTo = (lastFocused && lastFocused !== document.body && lastFocused.focus)
         ? lastFocused
-        : hamburger;
+        : toggle;
       if (returnTo && returnTo.focus) { returnTo.focus(); }
-    }
-
-    if (hamburger) {
-      hamburger.addEventListener('click', function () {
-        if (body.classList.contains('is-drawer-open')) { closeDrawer(); } else { openDrawer(); }
-      });
     }
 
     if (overlay) { overlay.addEventListener('click', closeDrawer); }
@@ -92,35 +80,57 @@
     function applyCollapsed(isCollapsed) {
       sidebar.classList.toggle('is-collapsed', isCollapsed);
       body.classList.toggle('is-sidebar-collapsed', isCollapsed);
-      if (collapser) {
-        collapser.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
-        collapser.setAttribute('aria-label',
-          isCollapsed ? 'Expand the sidebar' : 'Collapse the sidebar');
-      }
+      updateToggle();
     }
 
     var stored = null;
     try { stored = localStorage.getItem('sidebar_collapsed'); } catch (e) { /* ignore */ }
     applyCollapsed(stored === 'true');
 
-    if (collapser) {
-      collapser.addEventListener('click', function () {
-        var next = !sidebar.classList.contains('is-collapsed');
-        applyCollapsed(next);
-        try { localStorage.setItem('sidebar_collapsed', String(next)); } catch (e) { /* ignore */ }
+    /* --- Breakpoint guard ------------------------------------------------ */
+
+    function updateToggle() {
+      if (!toggle) { return; }
+      var icon = toggle.querySelector('i');
+      var desktop = wide.matches;
+      var drawerOpen = body.classList.contains('is-drawer-open');
+      var collapsed = sidebar.classList.contains('is-collapsed');
+
+      toggle.setAttribute('aria-expanded', desktop ? String(!collapsed) : String(drawerOpen));
+      toggle.setAttribute('aria-label', desktop
+        ? (collapsed ? 'Expand navigation' : 'Collapse navigation')
+        : (drawerOpen ? 'Close navigation' : 'Open navigation'));
+
+      if (icon) {
+        icon.className = desktop
+          ? 'fa-solid ' + (collapsed ? 'fa-chevron-right' : 'fa-chevron-left')
+          : 'fa-solid ' + (drawerOpen ? 'fa-xmark' : 'fa-bars');
+      }
+    }
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        if (wide.matches) {
+          var next = !sidebar.classList.contains('is-collapsed');
+          applyCollapsed(next);
+          try { localStorage.setItem('sidebar_collapsed', String(next)); } catch (e) { /* ignore */ }
+        } else if (body.classList.contains('is-drawer-open')) {
+          closeDrawer();
+        } else {
+          openDrawer();
+        }
       });
     }
 
-    /* --- Breakpoint guard ------------------------------------------------ */
-
-    var wide = window.matchMedia('(min-width: 768px)');
     function handleBreakpoint(event) {
       if (event.matches) { closeDrawer(); }
+      updateToggle();
     }
     if (wide.addEventListener) {
       wide.addEventListener('change', handleBreakpoint);
     } else if (wide.addListener) {
       wide.addListener(handleBreakpoint);   // older Safari
     }
+    updateToggle();
   });
 })(window.App);

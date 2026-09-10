@@ -57,7 +57,7 @@ from urllib.parse import urlencode
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
@@ -327,15 +327,16 @@ def integrations_view(request):
     held in demo mode, or set to live only and be unable to run at all. The
     card shows the effective answer and the reason for it.
     """
-    # Idempotent, and cheap when the table is already populated: a connector
-    # added to the project should appear here without anyone running a command.
-    if not Integration.objects.exists():
-        try:
-            integrations.ensure_integrations(owner=request.user)
-        except Exception:  # noqa: BLE001 -- an empty page beats a 500
-            pass
+    # Idempotent and cheap: a newly supported connector appears immediately.
+    # Rows for retired connectors remain in the database for audit history, but
+    # are deliberately excluded from the active configuration experience.
+    try:
+        integrations.ensure_integrations(owner=request.user)
+    except Exception:  # noqa: BLE001 -- an empty page beats a 500
+        pass
 
-    rows = list(Integration.objects.all())
+    supported_keys = {connector.key for connector in integrations.connector_classes()}
+    rows = list(Integration.objects.filter(provider_key__in=supported_keys))
     cards = [_card(row) for row in rows]
 
     groups = []
@@ -374,6 +375,8 @@ def integration_detail_view(request, provider_key):
     Manager's are therefore being simulated, which is the fact they need in
     order to decide whether to care.
     """
+    if integrations.connector_class(provider_key) is None:
+        raise Http404('This integration is not supported.')
     integration = get_object_or_404(Integration, provider_key=provider_key)
     card = _card(integration)
     dependants, capability_count, registry_available = _dependants(provider_key)

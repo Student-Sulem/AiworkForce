@@ -180,12 +180,10 @@ from . import (  # noqa: E402,F401  -- side-effect imports, deliberately last
     gmail,
     google_calendar,
     google_drive,
-    instagram,
     jira,
     knowledge_base,
-    linkedin,
-    notion,
-    slack,
+    sentry,
+    stripe,
 )
 
 __all__ = [

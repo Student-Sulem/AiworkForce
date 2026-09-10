@@ -56,16 +56,55 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env.load(BASE_DIR / '.env')
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
+# ---------------------------------------------------------------------------
+# Environment-driven deployment settings.
+#
+# Local development works out of the box (DEBUG on, permissive hosts). To run
+# production-grade, set these in the environment or in .env:
+#
+#     AIWORKFORCE_DEBUG=0                 turn DEBUG off
+#     SECRET_KEY=<a long random string>   a real secret, never the dev default
+#     ALLOWED_HOSTS=example.com,www.example.com
+#     AIWORKFORCE_SSL=1                   enable HTTPS redirects + secure cookies
+#
+# The defaults below keep `manage.py runserver` friction-free, while a real
+# deployment that sets these variables gets a hardened configuration.
+# ---------------------------------------------------------------------------
+
+def _env_flag(name, default=''):
+    return os.environ.get(name, default).strip().lower() in ('1', 'true', 'yes', 'on')
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-zy@af$ixk071jxi_^=8y9^z)*q390b=swf(kh%g9_6z%)sma7i'
+# A real deployment must supply its own; the dev default is only used when
+# DEBUG is on. Refusing to start in production without a real key is safer
+# than silently running with an insecure one.
+_SECRET_KEY = os.environ.get('SECRET_KEY', '').strip()
+if _SECRET_KEY:
+    SECRET_KEY = _SECRET_KEY
+else:
+    SECRET_KEY = 'django-insecure-zy@af$ixk071jxi_^=8y9^z)*q390b=swf(kh%g9_6z%)sma7i'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Defaults to True for development convenience; production must set
+# AIWORKFORCE_DEBUG=0 explicitly.
+DEBUG = _env_flag('AIWORKFORCE_DEBUG', '1')
 
-ALLOWED_HOSTS = ['*']
+_hosts = os.environ.get('ALLOWED_HOSTS', '').strip()
+ALLOWED_HOSTS = [h.strip() for h in _hosts.split(',') if h.strip()] if _hosts else ['*']
+
+# --- HTTPS / security hardening (active when not in DEBUG) ------------------
+if not DEBUG:
+    SECURE_SSL_REDIRECT = _env_flag('AIWORKFORCE_SSL', '1')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+    X_FRAME_OPTIONS = 'DENY'
+    # Browsers should only ever send the referrer for same-origin requests.
+
 
 
 # Application definition
@@ -164,6 +203,49 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+# Where `collectstatic` writes files for a production web server / CDN.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+
+# ---------------------------------------------------------------------------
+# Logging.
+#
+# In DEBUG the console shows everything. In production, warnings and errors go
+# to the console (and therefore to the process manager's log stream) while
+# Django's own request noise stays at INFO. This is deliberately simple; a
+# deployment can point the handlers at files or syslog via DJANGO_LOG_LEVEL.
+# ---------------------------------------------------------------------------
+
+LOG_LEVEL = os.environ.get('DJANGO_LOG_LEVEL', 'INFO').upper()
+
+LOGGING = {
+    'version': 1,
+    # Do not replace Django's own handlers wholesale; augment them. During the
+    # test suite Django's request logger emits a WARNING for every deliberate
+    # 4xx the tests provoke, and a root console handler would flood the output
+    # and slow the run. So only the application logger gets an explicit handler,
+    # and Django's framework loggers are left to their sensible defaults.
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'marketing': {
+            'handlers': ['console'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+    },
+}
 
 
 # Email

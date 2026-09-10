@@ -1,0 +1,26 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bad request — AI Workforce</title>
+    <link rel="stylesheet" href="{% static 'css/tokens.css' %}">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+        .err { text-align:center; padding: var(--sp-8); max-width: 460px; }
+        .err__code { font-size: 5rem; font-weight: var(--fw-bold); color: var(--color-text-subtle); line-height: 1; letter-spacing: -0.03em; }
+        .err h1 { font-size: var(--fs-xl); margin: var(--sp-4) 0 var(--sp-2); }
+        .err p { color: var(--color-text-muted); font-size: var(--fs-sm); margin-bottom: var(--sp-6); }
+    </style>
+</head>
+<body>
+    <div class="err">
+        <div class="err__code">400</div>
+        <h1>Bad request</h1>
+        <p>The request couldn't be understood. Please go back and try again.</p>
+        <a href="/" class="btn btn--primary"><i class="fa-solid fa-house"></i> Back to home</a>
+    </div>
+</body>
+</html>

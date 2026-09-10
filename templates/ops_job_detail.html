@@ -421,7 +421,7 @@
                     <div class="datalist__row">
                         <span class="datalist__key">Written by</span>
                         <span class="datalist__value">
-                            {{ opening.created_by_agent.name|default:opening.created_by.username|default:"Unknown" }}
+                            {% if opening.created_by_agent %}{{ opening.created_by_agent.name }}{% elif opening.created_by %}{{ opening.created_by.username }}{% else %}Unknown{% endif %}
                         </span>
                     </div>
                 </div>

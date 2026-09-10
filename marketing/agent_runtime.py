@@ -332,6 +332,21 @@ def max_tool_rounds():
                          MAX_TOOL_ROUNDS)
 
 
+def live_llm_active(agent):
+    """Whether this turn should call a real language model.
+
+    The test suite must be hermetic. A live model configured in ``.env`` would
+    otherwise make every end-to-end chat test hit the provider over the network,
+    which is slow and non-deterministic. Under ``TESTING`` the employee answers
+    from its tools and templates exactly as it does when no model is configured,
+    so the suite runs identically on a machine with an API key and one without.
+    """
+    from django.conf import settings
+    if getattr(settings, 'TESTING', False):
+        return False
+    return agent.has_live_llm
+
+
 # ===========================================================================
 # The system prompt
 # ===========================================================================
@@ -564,7 +579,7 @@ def run_turn(conversation, user_text, *, user=None, task=None, auto_approve=Fals
     messages = [{'role': 'system', 'content': build_system_prompt(agent, user=user)}]
     messages.extend(_history_for(conversation))
 
-    if agent.has_live_llm:
+    if live_llm_active(agent):
         outcome = _conduct(agent, messages, ctx, agent_type=agent.agent_type)
     else:
         outcome = fallback_turn(agent, conversation, text, ctx)
@@ -647,7 +662,7 @@ def run_agent_task(agent, instruction, *, user=None, parent_task=None):
         {'role': 'user', 'content': text},
     ]
 
-    if agent.has_live_llm:
+    if live_llm_active(agent):
         outcome = _conduct(agent, messages, ctx, agent_type=agent.agent_type)
     else:
         outcome = fallback_turn(agent, None, text, ctx)

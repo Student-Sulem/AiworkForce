@@ -169,7 +169,8 @@ def ensure_agents(owner=None):
                 'persona_description': row['persona_description'],
                 'system_prompt': workforce.full_prompt(row),
                 'llm_model': model,
-                'max_tokens': 1200,
+                'temperature': row.get('temperature', 0.7),
+                'max_tokens': row.get('max_tokens', 1200),
                 'user': owner,
             },
         )

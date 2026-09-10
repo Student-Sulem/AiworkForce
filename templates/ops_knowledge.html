@@ -1,470 +1,96 @@
 {% extends 'base.html' %}
 {% load static %}
-{% comment %}
-    OPERATIONS -- the knowledge base.
-    Rendered by marketing.views_ops.knowledge_view at the URL named
-    'ops_knowledge'.
-
-    STRUCTURE
-      1. live search      posts to api_knowledge_search, renders each hit with
-                          its snippet, its score bar and its `why` explanation
-      2. what we have     the figures from knowledge.document_stats()
-      3. the documents    filtered by type and department, paginated
-      4. the sources      with the last sync time and a Sync now button
-      5. add a document   for a person who wants to paste in a policy
-      6. research reports with their citation counts
-
-    WHY SEARCH IS FIRST AND LIVE
-    A knowledge base is consulted, not browsed: somebody has a question now.
-    Search is therefore the top of the page and runs as you type, and each hit
-    carries the `why` sentence from marketing/knowledge.py, because a result
-    that cannot say why it matched is a result nobody trusts twice.
-
-    THE SCORE BAR IS RELATIVE TO THE BEST HIT in the same result set. Scores of
-    this kind have no ceiling, so a bar against an invented maximum would tell
-    the reader nothing except that nobody had thought about it.
-{% endcomment %}
-
-{% block title %}Knowledge base | AI Workforce{% endblock %}
-{% block body_class %}page-ops page-ops-knowledge{% endblock %}
-{% block page_title %}Knowledge base{% endblock %}
-{% block page_subtitle %}
-    What the company has actually written down. {{ employee_name }} answers from this and
-    nothing else, which is why what is missing from it matters as much as what is in it.
-{% endblock %}
-
-{% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/ops.css' %}">
-{% endblock %}
-
-{% block page_actions %}
-    {% if employee %}
-    <a href="{% url 'employee_profile' employee.agent_type %}" class="btn btn--secondary">
-        <i class="fa-solid {{ employee.avatar_icon }}" aria-hidden="true"></i>
-        {{ employee.name }}
-    </a>
-    {% endif %}
-    <a href="{% url 'agents' %}" class="btn btn--primary">
-        <i class="fa-solid fa-comments" aria-hidden="true"></i> Ask a research question
-    </a>
-{% endblock %}
+{% block title %}Knowledge | AI Workforce{% endblock %}
+{% block body_class %}page-ops{% endblock %}
+{% block page_title %}Knowledge Base{% endblock %}
+{% block page_subtitle %}Documents, sources and research.{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/ops.css' %}">{% endblock %}
 
 {% block content %}
-{% url 'agents' as agents_url %}
-
-<!-- 1. Live search -------------------------------------------------------- -->
-<section class="card u-mb-6">
-    <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                Search the knowledge base
-            </h2>
-            <p class="card__subtitle">
-                The same ranking the AI employees use. A query made only of common words
-                returns nothing rather than everything, which is the honest answer.
-            </p>
-        </div>
-    </div>
-    <div class="card__body">
-        <form class="toolbar u-mb-4" id="knowledgeSearchForm"
-              data-search-url="{% url 'api_knowledge_search' %}">
-            <div class="toolbar__search">
-                <label class="sr-only" for="knowledgeQuery">Search the knowledge base</label>
-                <input class="form-input" id="knowledgeQuery" type="search"
-                       placeholder="What is our refund policy?" autocomplete="off">
-            </div>
-            <div class="toolbar__filters">
-                <label class="sr-only" for="knowledgeSearchType">Limit to a document type</label>
-                <select class="form-select" id="knowledgeSearchType">
-                    <option value="">Every type</option>
-                    {% for value, label in doc_type_choices %}
-                    <option value="{{ value }}">{{ label }}</option>
-                    {% endfor %}
-                </select>
-                <button class="btn btn--primary" type="submit">
-                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Search
-                </button>
-            </div>
-        </form>
-
-        <p class="u-text-xs u-text-subtle" id="knowledgeResultsSummary" aria-live="polite"></p>
-
-        <div class="hits" id="knowledgeResults" aria-live="polite"></div>
-
-        <noscript>
-            <p class="u-text-sm u-text-muted u-m-0">
-                Live search needs JavaScript. The document list below is filtered by the
-                server, so use its search box instead.
-            </p>
-        </noscript>
-    </div>
-</section>
-
-<!-- 2. What the company has ---------------------------------------------- -->
 <div class="grid grid-kpi u-mb-6">
-    {% include 'partials/_kpi_tile.html' with label="Documents" value=stats.documents|default:0 icon="fa-book" tone="primary" meta="Active and indexed" %}
-    {% include 'partials/_kpi_tile.html' with label="Indexed passages" value=stats.chunks|default:0 icon="fa-layer-group" tone="info" meta="What search actually ranks" %}
-    {% include 'partials/_kpi_tile.html' with label="Words" value=stats.words|default:0 icon="fa-align-left" tone="success" %}
-    {% include 'partials/_kpi_tile.html' with label="Sources" value=stats.sources|default:0 icon="fa-plug" tone="warning" meta="Where documents come from" %}
+    {% include 'partials/_kpi_tile.html' with label="Documents" value=stats.documents icon="fa-book" tone="primary" %}
+    {% include 'partials/_kpi_tile.html' with label="Passages" value=stats.chunks icon="fa-paragraph" tone="info" %}
+    {% include 'partials/_kpi_tile.html' with label="Words" value=stats.words icon="fa-font" tone="success" %}
+    {% include 'partials/_kpi_tile.html' with label="Sources" value=stats.sources icon="fa-database" tone="warning" %}
 </div>
 
-{% if by_type %}
-<section class="card u-mb-6">
-    <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-shapes" aria-hidden="true"></i> By document type
-            </h2>
-            <p class="card__subtitle">
-                A gap here is a gap in what the employees can answer.
-                {% if stats.last_indexed %}
-                    Last indexed {{ stats.last_indexed|date:"j M Y H:i" }}.
-                {% endif %}
-            </p>
-        </div>
-    </div>
+<!-- Search -->
+<section class="card u-mb-4">
     <div class="card__body">
-        <div class="chip-set">
-            {% for row in by_type %}
-            <a class="chip" href="?doc_type={{ row.value }}">
-                {{ row.label }}
-                <span class="badge badge--neutral">{{ row.count }}</span>
-            </a>
-            {% endfor %}
-        </div>
-    </div>
-</section>
-{% endif %}
-
-<!-- 3. The document list -------------------------------------------------- -->
-<form class="toolbar" method="get" action="{% url 'ops_knowledge' %}">
-    <div class="toolbar__search">
-        <label class="sr-only" for="documentSearch">Filter documents by title or content</label>
-        <input class="form-input" id="documentSearch" type="search" name="q"
-               value="{{ search_query }}" placeholder="Filter documents by title or content">
-    </div>
-    <div class="toolbar__filters">
-        <label class="sr-only" for="documentTypeFilter">Filter by type</label>
-        <select class="form-select" id="documentTypeFilter" name="doc_type">
-            <option value="all" {% if doc_type_filter == 'all' %}selected{% endif %}>Every type</option>
-            {% for value, label in doc_type_choices %}
-            <option value="{{ value }}" {% if doc_type_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="sr-only" for="documentDepartmentFilter">Filter by department</label>
-        <select class="form-select" id="documentDepartmentFilter" name="department">
-            <option value="all" {% if department_filter == 'all' %}selected{% endif %}>Every department</option>
-            {% for name in departments %}
-            <option value="{{ name }}" {% if department_filter == name %}selected{% endif %}>{{ name }}</option>
-            {% endfor %}
-        </select>
-
-        <button class="btn btn--secondary" type="submit">
-            <i class="fa-solid fa-filter" aria-hidden="true"></i> Apply
-        </button>
-        {% if has_filters %}
-        <a class="btn btn--ghost" href="{% url 'ops_knowledge' %}">Clear</a>
-        {% endif %}
-    </div>
-</form>
-
-<section class="card u-mb-6">
-    <div class="card__header">
-        <h2 class="card__title">
-            <i class="fa-solid fa-book" aria-hidden="true"></i> Documents
-        </h2>
-    </div>
-    <div class="card__body card__body--flush">
-        {% if documents %}
-        <div class="table-wrap">
-            <table class="table table--stack">
-                <thead>
-                    <tr>
-                        <th scope="col">Document</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Department</th>
-                        <th scope="col">Passages</th>
-                        <th scope="col">Words</th>
-                        <th scope="col">Cited</th>
-                        <th scope="col">Indexed</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for document in documents %}
-                    <tr>
-                        <td data-label="Document">
-                            <a class="u-semibold" href="{% url 'ops_document' document.pk %}">
-                                {{ document.title }}
-                            </a>
-                            <span class="u-text-xs u-text-subtle" style="display:block;">
-                                {{ document.source.name|default:"No source recorded" }}
-                                &middot; version {{ document.version }}
-                                {% if document.author %}&middot; {{ document.author }}{% endif %}
-                            </span>
-                        </td>
-                        <td data-label="Type">
-                            <span class="badge badge--info">{{ document.get_doc_type_display }}</span>
-                        </td>
-                        <td data-label="Department">
-                            {{ document.department|default:"Not set" }}
-                        </td>
-                        <td data-label="Passages">{{ document.chunks_total }}</td>
-                        <td data-label="Words">{{ document.word_count }}</td>
-                        <td data-label="Cited">{{ document.citation_total }}</td>
-                        <td data-label="Indexed">
-                            {{ document.indexed_at|date:"j M Y"|default:"Never" }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="card__body">
-            {% include 'partials/_empty_state.html' with icon="fa-book" title="No documents match" message="Ask Knowledge & Research to index something, or paste a policy in below. Until a document exists, every employee answering a policy question can only say that the knowledge base does not cover it." action_url=agents_url action_label="Talk to Knowledge & Research" %}
-        </div>
-        {% endif %}
-    </div>
-</section>
-
-{% include 'partials/_pagination.html' with page_obj=page_obj querystring=querystring %}
-
-<!-- 4. The sources -------------------------------------------------------- -->
-<section class="card u-mb-6">
-    <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-plug" aria-hidden="true"></i> Sources
-            </h2>
-            <p class="card__subtitle">
-                Where documents come from. Syncing rebuilds the passages of what is stored;
-                where the connected application is not configured there is nothing external
-                to pull, and the result says so rather than reporting a success.
-            </p>
-        </div>
-    </div>
-    <div class="card__body card__body--flush">
-        {% if sources %}
-        <div class="table-wrap">
-            <table class="table table--stack">
-                <thead>
-                    <tr>
-                        <th scope="col">Source</th>
-                        <th scope="col">Kind</th>
-                        <th scope="col">Documents</th>
-                        <th scope="col">Last synced</th>
-                        <th scope="col">Last result</th>
-                        {% if can_manage %}<th scope="col">Actions</th>{% endif %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for source in sources %}
-                    <tr data-source-row="{{ source.pk }}">
-                        <td data-label="Source">
-                            <span class="u-semibold">{{ source.name }}</span>
-                            <span class="u-text-xs u-text-subtle" style="display:block;">
-                                {{ source.get_sync_mode_display }}
-                                {% if not source.is_enabled %}
-                                &middot; <span style="color: var(--color-danger);">switched off</span>
-                                {% endif %}
-                            </span>
-                        </td>
-                        <td data-label="Kind">{{ source.get_kind_display }}</td>
-                        <td data-label="Documents">
-                            <span data-source-count>{{ source.indexed_documents }}</span>
-                        </td>
-                        <td data-label="Last synced">
-                            <span data-source-synced>
-                                {{ source.last_synced_at|date:"j M Y H:i"|default:"Never" }}
-                            </span>
-                        </td>
-                        <td data-label="Last result">
-                            <span class="u-text-xs u-text-subtle" data-source-message>
-                                {{ source.last_sync_message|default:"Nothing recorded" }}
-                            </span>
-                        </td>
-                        {% if can_manage %}
-                        <td data-label="Actions">
-                            <button class="btn btn--secondary btn--sm" type="button"
-                                    data-sync-source="{{ source.pk }}"
-                                    data-sync-url="{% url 'api_knowledge_sync' %}"
-                                    {% if not source.is_enabled %}disabled{% endif %}>
-                                <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-                                Sync now
-                            </button>
-                        </td>
-                        {% endif %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="card__body">
-            {% include 'partials/_empty_state.html' with icon="fa-plug-circle-xmark" title="No sources registered" message="Nothing feeds the knowledge base automatically. Paste a document in below, or ask Knowledge & Research to index one." action_url=agents_url action_label="Talk to Knowledge & Research" %}
-        </div>
-        {% endif %}
-    </div>
-</section>
-
-<!-- 5. Add a document ----------------------------------------------------- -->
-{% if can_add %}
-<section class="card u-mb-6">
-    <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>
-                Add a document
-            </h2>
-            <p class="card__subtitle">
-                Paste a policy, a handbook section or an FAQ. It is chunked and indexed the
-                same way a synchronised document is, so the employees can quote it
-                immediately.
-            </p>
-        </div>
-    </div>
-    <div class="card__body">
-        <form id="addDocumentForm" data-index-url="{% url 'api_knowledge_index' %}">
-            <div class="form-row form-row--2">
-                <div class="form-field">
-                    <label class="form-field__label" for="newDocTitle">
-                        Title <span class="form-field__required" aria-hidden="true">*</span>
-                    </label>
-                    <input class="form-input" id="newDocTitle" name="title" type="text"
-                           maxlength="250" required
-                           placeholder="Refund and returns policy">
-                    <p class="form-field__hint">
-                        Re-using an existing title updates that document rather than
-                        creating a second copy of it.
-                    </p>
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field__label" for="newDocType">Type</label>
-                    <select class="form-select" id="newDocType" name="doc_type">
-                        {% for value, label in doc_type_choices %}
-                        <option value="{{ value }}" {% if value == 'policy' %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                    <p class="form-field__hint">
-                        Search can be narrowed by type, so this is worth getting right.
-                    </p>
-                </div>
-            </div>
-
-            <div class="form-row form-row--2">
-                <div class="form-field">
-                    <label class="form-field__label" for="newDocDepartment">Department</label>
-                    <input class="form-input" id="newDocDepartment" name="department"
-                           type="text" maxlength="80" placeholder="Finance">
-                </div>
-
-                <div class="form-field">
-                    <label class="form-field__label" for="newDocTags">Tags</label>
-                    <input class="form-input" id="newDocTags" name="tags" type="text"
-                           placeholder="refunds, returns, consumer-law">
-                    <p class="form-field__hint">Separated by commas.</p>
-                </div>
-            </div>
-
-            <div class="form-field">
-                <label class="form-field__label" for="newDocContent">
-                    Content <span class="form-field__required" aria-hidden="true">*</span>
-                </label>
-                <textarea class="form-textarea" id="newDocContent" name="content" rows="10"
-                          required
-                          placeholder="Paste the document text. Headings are detected and become passage boundaries, which is what makes a search result point at the right section."></textarea>
-                <p class="form-field__hint">
-                    At least ten words. Indexing byte-identical content again costs nothing,
-                    so re-pasting a corrected version is safe.
-                </p>
-            </div>
-
-            <div class="form-actions">
-                <button class="btn btn--primary" type="submit">
-                    <i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>
-                    Index this document
-                </button>
-            </div>
+        <form class="u-flex u-gap-2" method="get" action="{% url 'ops_knowledge' %}">
+            <input class="form-input" type="search" name="q" value="{{ search_query }}" placeholder="Search the knowledge base..." style="flex:1;">
+            <button class="btn btn--primary" type="submit"><i class="fa-solid fa-search"></i> Search</button>
         </form>
     </div>
 </section>
-{% else %}
-<div class="alert alert--info u-mb-6">
-    <i class="fa-solid fa-eye" aria-hidden="true"></i>
-    <span>
-        You are reading this page. Adding a document to the knowledge base is an Analyst
-        capability or above, because every employee answers policy questions from it.
-    </span>
-</div>
-{% endif %}
 
-<!-- 6. Research reports --------------------------------------------------- -->
+<!-- Documents -->
+<section class="card u-mb-4">
+    <div class="card__header">
+        <h2 class="card__title"><i class="fa-solid fa-book"></i> Documents</h2>
+        <form class="u-flex u-gap-2 u-wrap" method="get" action="{% url 'ops_knowledge' %}">
+            <select class="form-select" name="type" style="width:140px;">
+                <option value="all" {% if doc_type_filter == 'all' %}selected{% endif %}>All types</option>
+                {% for v, l in doc_type_choices %}<option value="{{ v }}" {% if doc_type_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+            </select>
+            <select class="form-select" name="department" style="width:150px;">
+                <option value="all" {% if department_filter == 'all' %}selected{% endif %}>All departments</option>
+                {% for d in departments %}<option value="{{ d }}" {% if department_filter == d %}selected{% endif %}>{{ d }}</option>{% endfor %}
+            </select>
+            <button class="btn btn--secondary btn--sm" type="submit">Filter</button>
+            {% if has_filters %}<a class="btn btn--ghost btn--sm" href="{% url 'ops_knowledge' %}">Clear</a>{% endif %}
+        </form>
+    </div>
+    <div class="card__body card__body--flush">
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>Title</th><th>Type</th><th>Department</th><th>Passages</th><th>Words</th><th></th></tr></thead>
+                <tbody>
+                    {% for d in page_obj %}
+                    <tr>
+                        <td><a href="{% url 'ops_document' d.pk %}">{{ d.title }}</a></td>
+                        <td><span class="chip">{{ d.get_doc_type_display }}</span></td>
+                        <td class="u-text-xs u-text-muted">{{ d.department|default:"-" }}</td>
+                        <td>{{ d.chunks_total }}</td>
+                        <td class="u-text-xs u-text-muted">{{ d.word_count|default:"-" }}</td>
+                        <td class="table__actions"><a href="{% url 'ops_document' d.pk %}" class="btn btn--ghost btn--xs">Read</a></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="u-text-center u-text-muted">No documents yet. Ask Research to add one.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% include 'partials/_pagination.html' with page=page_obj %}
+    </div>
+</section>
+
+<!-- Sources -->
+{% if sources %}
 <section class="card">
     <div class="card__header">
-        <div>
-            <h2 class="card__title">
-                <i class="fa-solid fa-magnifying-glass-chart" aria-hidden="true"></i>
-                Research reports
-            </h2>
-            <p class="card__subtitle">
-                Written by {{ employee_name }}, with every factual claim attributed. A report
-                with no citations is worth reading sceptically.
-            </p>
-        </div>
+        <h2 class="card__title"><i class="fa-solid fa-database"></i> Sources</h2>
     </div>
     <div class="card__body card__body--flush">
-        {% if reports %}
         <div class="table-wrap">
-            <table class="table table--stack">
-                <thead>
-                    <tr>
-                        <th scope="col">Report</th>
-                        <th scope="col">Question</th>
-                        <th scope="col">Citations</th>
-                        <th scope="col">Confidence</th>
-                        <th scope="col">Written</th>
-                    </tr>
-                </thead>
+            <table class="table">
+                <thead><tr><th>Name</th><th>Kind</th><th>Documents</th><th>Sync</th><th>Last synced</th></tr></thead>
                 <tbody>
-                    {% for report in reports %}
+                    {% for s in sources %}
                     <tr>
-                        <td data-label="Report">
-                            <span class="u-semibold">{{ report.title }}</span>
-                            <span class="u-text-xs u-text-subtle" style="display:block;">
-                                {{ report.get_kind_display }}
-                                &middot; {{ report.agent.name|default:"unknown author" }}
-                            </span>
-                        </td>
-                        <td data-label="Question">
-                            {{ report.question|truncatechars:90|default:"Not recorded" }}
-                        </td>
-                        <td data-label="Citations">
-                            {% if report.citation_total %}
-                            <span class="badge badge--success">{{ report.citation_total }}</span>
-                            {% else %}
-                            <span class="badge badge--danger">None</span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Confidence">{{ report.confidence|floatformat:2 }}</td>
-                        <td data-label="Written">{{ report.created_at|date:"j M Y" }}</td>
+                        <td><span class="u-semibold">{{ s.name }}</span></td>
+                        <td><span class="chip">{{ s.get_kind_display }}</span></td>
+                        <td>{{ s.document_count }}</td>
+                        <td class="u-text-xs">{{ s.get_sync_mode_display|default:s.sync_mode }}</td>
+                        <td class="u-text-xs u-text-muted">{{ s.last_synced_at|date:"D j M H:i"|default:"never" }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-        {% else %}
-        <div class="card__body">
-            {% include 'partials/_empty_state.html' with icon="fa-magnifying-glass-chart" title="No research reports yet" message="Ask Knowledge & Research a question. It searches before answering, names the document behind every claim, and says explicitly when the knowledge base does not cover something." action_url=agents_url action_label="Talk to Knowledge & Research" %}
-        </div>
-        {% endif %}
     </div>
 </section>
+{% endif %}
 {% endblock %}
 
-
-{% block extra_js %}
-<script src="{% static 'js/ops.js' %}" defer></script>
-{% endblock %}
+{% block extra_js %}<script src="{% static 'js/ops.js' %}" defer></script>{% endblock %}

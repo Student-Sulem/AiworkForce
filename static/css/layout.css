@@ -63,8 +63,35 @@ body.is-drawer-open .sidebar { transform: translateX(0); }
   border-radius: var(--r-md);
   background: var(--color-primary);
   color: var(--color-text-onaccent);
-  font-size: var(--fs-base);
+  font-size: 0.9375rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.06em;
 }
+
+.sidebar__group { border: 0; }
+
+.sidebar__group > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+}
+
+.sidebar__group > summary::-webkit-details-marker { display: none; }
+
+.sidebar__group > summary::after {
+  content: '\203a';
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-regular);
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform var(--transition-fast);
+}
+
+.sidebar__group[open] > summary::after { transform: rotate(90deg); }
+
+.sidebar__group > nav { padding-bottom: var(--sp-1); }
 
 .sidebar__section {
   padding: var(--sp-4) var(--sp-2) var(--sp-1);
@@ -261,10 +288,12 @@ body.is-drawer-open { overflow: hidden; }
 
 
 /* ==========================================================================
-   >= 768px -- permanent icon rail, drawer disabled
+   >= 1024px -- permanent sidebar. Smaller desktop and tablet screens use
+   the same single drawer control as phones instead of an unusably narrow
+   icon rail.
    ========================================================================== */
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .sidebar {
     width: var(--sidebar-w-rail);
     padding: var(--sp-4) var(--sp-2);
@@ -274,6 +303,8 @@ body.is-drawer-open { overflow: hidden; }
   .sidebar .sidebar__section,
   .sidebar .sidebar__brand span,
   .sidebar .sidebar__user-text { display: none; }
+
+  .sidebar__group > nav { padding-bottom: 0; }
 
   .sidebar__link { justify-content: center; padding: var(--sp-3) 0; }
   .sidebar__badge {
@@ -286,8 +317,7 @@ body.is-drawer-open { overflow: hidden; }
   .sidebar__link { position: relative; }
   .sidebar__user { justify-content: center; }
 
-  .drawer-overlay,
-  .topbar__hamburger { display: none; }
+  .drawer-overlay { display: none; }
 
   body.is-drawer-open { overflow: auto; }
 
@@ -309,6 +339,7 @@ body.is-drawer-open { overflow: hidden; }
    ========================================================================== */
 
 @media (min-width: 1024px) {
+  .topbar__brand { display: none; }
   .sidebar { width: var(--sidebar-w); padding: var(--sp-5) var(--sp-3); }
   .sidebar .nav-label,
   .sidebar .sidebar__section,
@@ -334,6 +365,7 @@ body.is-drawer-open { overflow: hidden; }
   .sidebar.is-collapsed .sidebar__user-text { display: none; }
   .sidebar.is-collapsed .sidebar__link { justify-content: center; padding: var(--sp-3) 0; }
   .sidebar.is-collapsed .sidebar__user { justify-content: center; }
+  .sidebar.is-collapsed .sidebar__group > nav { display: block !important; }
   .sidebar.is-collapsed + .drawer-overlay + .app-shell__main,
   body.is-sidebar-collapsed .app-shell__main { margin-left: var(--sidebar-w-rail); }
 
