@@ -215,15 +215,15 @@ body.is-drawer-open { overflow: hidden; }
 
 /* --- Main content --------------------------------------------------------- */
 
-.main { flex: 1; padding: var(--sp-5) var(--sp-4) var(--sp-10); }
+.main { flex: 1; padding: var(--sp-6) var(--sp-5) var(--sp-12); }
 
 .page { width: 100%; max-width: var(--content-max); margin: 0 auto; }
 
 .page-header {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-6);
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-8);
 }
 
 .page-header__title { font-size: var(--fs-xl); }
@@ -243,10 +243,10 @@ body.is-drawer-open { overflow: hidden; }
 
 /* --- Grid helpers --------------------------------------------------------- */
 
-.grid { display: grid; gap: var(--sp-4); }
+.grid { display: grid; gap: var(--sp-5); }
 .grid-2   { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid-3   { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.grid-kpi { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.grid-kpi { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .grid-cards { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -380,4 +380,8 @@ body.is-drawer-open { overflow: hidden; }
 
 @media (min-width: 1440px) {
   .main { padding-left: var(--sp-10); padding-right: var(--sp-10); }
+}
+
+@media (max-width: 374px) {
+  .grid-kpi { grid-template-columns: 1fr; }
 }

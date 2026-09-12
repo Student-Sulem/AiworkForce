@@ -41,6 +41,13 @@ that move rather than replaced, and WorkforceOSTests is new.
     WorkforceOSTests           the six-employee redesign: the propose/approve/
                                execute pipeline, redaction, routing and the
                                knowledge base
+    GitHubConnectorDemoTests   every GitHub operation's simulated half, which is
+                               all that runs while the test suite is active
+    GitHubConnectorLiveTests   the real API half, exercised directly against
+                               the connector with the HTTP call mocked out
+    GitHubDeveloperToolsTests  the agent-facing tools built on the connector:
+                               reads that act at once, writes that only queue
+                               a proposal, and repository create/update/delete
 """
 
 import io
@@ -71,8 +78,9 @@ from .forms import AIAgentForm, ApprovalDecisionForm
 from .models import (AIAgent, ApprovalAuditLog, ApprovalRequest, ChatMessage,
                      Conversation, EmailOutreach, Lead, LLMModel, LLMProvider,
                      MCPServer, MCPTool, Profile, SocialPost)
+from .models_eng import CodeReview
 from .models_hr import HRAnnouncement
-from .models_platform import ProposedAction
+from .models_platform import ExternalIssue, ProposedAction
 from .tools import base as tool_base
 
 PAGE_NAMES = ['dashboard', 'agents', 'approvals', 'users', 'configurations', 'mcp_tools']
@@ -2301,3 +2309,488 @@ class WorkforceOSTests(TestCase):
     def test_a_slack_call_is_simulated_under_testing(self):
         result = integrations.call('github', 'create_issue', title='test', body='test')
         self.assertTrue(result.demo)
+
+
+class GitHubConnectorDemoTests(TestCase):
+    """The GitHub connector's simulated half.
+
+    settings.TESTING forces every connector to demo mode regardless of how the
+    Integration row is configured (see Connector.call in
+    marketing/integrations/base.py), so every one of these goes through
+    integrations.call exactly as a tool would and never opens a socket.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('devdemo', 'devdemo@example.com',
+                                              'pw-devdemo-12345')
+        agent_engine.ensure_workspace_for_user(self.user)
+
+    # -- issues --------------------------------------------------------------
+
+    def test_create_issue_returns_a_stable_simulated_number(self):
+        first = integrations.call('github', 'create_issue', repo='acme/platform',
+                                   title='Export is slow')
+        second = integrations.call('github', 'create_issue', repo='acme/platform',
+                                    title='Export is slow')
+        self.assertTrue(first.ok)
+        self.assertTrue(first.demo)
+        self.assertIn('number', first.data)
+        self.assertEqual(first.data['number'], second.data['number'])
+
+    def test_create_issue_needs_a_title(self):
+        result = integrations.call('github', 'create_issue', repo='acme/platform', title='')
+        self.assertFalse(result.ok)
+
+    def test_update_issue_needs_a_change(self):
+        result = integrations.call('github', 'update_issue', repo='acme/platform', number=201)
+        self.assertFalse(result.ok)
+
+    def test_update_issue_reports_what_changed(self):
+        result = integrations.call('github', 'update_issue', repo='acme/platform',
+                                    number=201, state='closed')
+        self.assertTrue(result.ok)
+        self.assertIn('state', result.data['changed'])
+
+    def test_comment_needs_a_body(self):
+        result = integrations.call('github', 'comment_issue', repo='acme/platform',
+                                    number=201, body='')
+        self.assertFalse(result.ok)
+
+    def test_comment_on_an_issue(self):
+        result = integrations.call('github', 'comment_issue', repo='acme/platform',
+                                    number=201, body='Looking into this now.')
+        self.assertTrue(result.ok)
+        self.assertIn('comment_id', result.data)
+
+    def test_close_issue_defaults_to_completed(self):
+        result = integrations.call('github', 'close_issue', repo='acme/platform', number=201)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['state'], 'closed')
+        self.assertEqual(result.data['reason'], 'completed')
+
+    def test_list_issues_excludes_pull_requests(self):
+        result = integrations.call('github', 'list_issues', repo='acme/platform', state='open')
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['pull_requests_excluded'], 3)
+        self.assertTrue(all('number' in row for row in result.data['issues']))
+
+    def test_list_issues_filters_by_label(self):
+        result = integrations.call('github', 'list_issues', repo='acme/platform',
+                                    labels='security')
+        self.assertTrue(result.ok)
+        self.assertGreater(result.data['count'], 0)
+        self.assertTrue(all('security' in row['labels'] for row in result.data['issues']))
+
+    def test_get_issue_found(self):
+        result = integrations.call('github', 'get_issue', repo='acme/platform', number=201)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['issue']['number'], 201)
+
+    def test_get_issue_not_in_fixture(self):
+        result = integrations.call('github', 'get_issue', repo='acme/platform', number=999)
+        self.assertTrue(result.ok)
+        self.assertFalse(result.data['found'])
+
+    # -- pull requests ---------------------------------------------------------
+
+    def test_list_pull_requests(self):
+        result = integrations.call('github', 'list_pull_requests', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['count'], 3)
+
+    def test_get_pull_request_found_carries_a_size_warning(self):
+        result = integrations.call('github', 'get_pull_request', repo='acme/platform',
+                                    number=214)
+        self.assertTrue(result.ok)
+        self.assertIn('size_warning', result.data['pull_request'])
+
+    def test_get_pull_request_not_found(self):
+        result = integrations.call('github', 'get_pull_request', repo='acme/platform', number=1)
+        self.assertTrue(result.ok)
+        self.assertFalse(result.data['found'])
+
+    def test_list_pull_request_files(self):
+        result = integrations.call('github', 'list_pull_request_files', repo='acme/platform',
+                                    number=214)
+        self.assertTrue(result.ok)
+        self.assertGreater(result.data['count'], 0)
+
+    # -- repository, files, search, wiki, commits -------------------------------
+
+    def test_get_repo(self):
+        result = integrations.call('github', 'get_repo', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['repository']['full_name'], 'acme/platform')
+
+    def test_read_readme(self):
+        result = integrations.call('github', 'read_file', repo='acme/platform', path='README.md')
+        self.assertTrue(result.ok)
+        self.assertIn('Acme', result.data['content'])
+
+    def test_read_missing_file_is_an_honest_not_found(self):
+        result = integrations.call('github', 'read_file', repo='acme/platform', path='nope.txt')
+        self.assertTrue(result.ok)
+        self.assertFalse(result.data['found'])
+
+    def test_search_code_needs_a_query(self):
+        result = integrations.call('github', 'search_code', repo='acme/platform', query='')
+        self.assertFalse(result.ok)
+
+    def test_search_code_finds_a_match_in_the_fixture_docs(self):
+        result = integrations.call('github', 'search_code', repo='acme/platform',
+                                    query='migration')
+        self.assertTrue(result.ok)
+        self.assertGreater(result.data['count'], 0)
+
+    def test_list_wiki_says_plainly_it_is_really_markdown_docs(self):
+        result = integrations.call('github', 'list_wiki', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertFalse(result.data['wiki_api_available'])
+        self.assertGreater(result.data['count'], 0)
+
+    def test_list_commits(self):
+        result = integrations.call('github', 'list_commits', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertGreater(result.data['count'], 0)
+
+    # -- repository administration ----------------------------------------------
+
+    def test_create_repo(self):
+        result = integrations.call('github', 'create_repo', name='new-service', private=True)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.demo)
+        self.assertTrue(result.data['repository'].endswith('/new-service'))
+
+    def test_update_repo_with_no_fields_changes_nothing(self):
+        result = integrations.call('github', 'update_repo', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['changed'], [])
+
+    def test_update_repo_reports_the_changed_fields(self):
+        result = integrations.call('github', 'update_repo', repo='acme/platform',
+                                    description='New description')
+        self.assertTrue(result.ok)
+        self.assertIn('description', result.data['changed'])
+
+    def test_delete_repo_requires_the_full_owner_name(self):
+        blank = integrations.call('github', 'delete_repo', repo='')
+        self.assertFalse(blank.ok)
+        bare = integrations.call('github', 'delete_repo', repo='no-slash')
+        self.assertFalse(bare.ok)
+
+    def test_delete_repo_is_simulated_and_says_so(self):
+        result = integrations.call('github', 'delete_repo', repo='acme/scratch')
+        self.assertTrue(result.ok)
+        self.assertTrue(result.demo)
+        self.assertFalse(result.data['deleted'])
+
+
+class GitHubConnectorLiveTests(TestCase):
+    """The connector's real-API half.
+
+    integrations.call always demo-forces under settings.TESTING, so these
+    instantiate the connector directly and call its live_* methods, with the
+    one HTTP primitive (Connector.request_json) mocked out. That is the only
+    way to prove what the real request and error handling look like without
+    the test suite reaching the network.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('devlive', 'devlive@example.com',
+                                              'pw-devlive-12345')
+        agent_engine.ensure_workspace_for_user(self.user)
+        integration = integrations.get_integration('github')
+        integration.secrets = {'access_token': 'tok-123'}
+        integration.config = {'default_repository': 'acme/widgets'}
+        integration.mode = 'live'
+        self.connector = integrations.get_connector(integration)
+
+    def test_create_issue_posts_to_the_issues_endpoint(self):
+        with mock.patch.object(
+                self.connector, 'request_json',
+                return_value=(201, {
+                    'number': 42, 'title': 'Bug',
+                    'html_url': 'https://github.com/acme/widgets/issues/42',
+                    'url': 'https://api.github.com/repos/acme/widgets/issues/42',
+                    'state': 'open', 'labels': [], 'assignees': [],
+                })) as fake:
+            result = self.connector.live_create_issue(repo='acme/widgets', title='Bug')
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['number'], 42)
+        self.assertEqual(fake.call_args.kwargs['method'], 'POST')
+        self.assertIn('/repos/acme/widgets/issues', fake.call_args.args[0])
+
+    def test_list_issues_excludes_pull_requests(self):
+        with mock.patch.object(
+                self.connector, 'request_json',
+                return_value=(200, [
+                    {'number': 1, 'title': 'Real issue', 'labels': [], 'assignees': []},
+                    {'number': 2, 'title': 'A PR wearing an issue number',
+                     'pull_request': {}, 'labels': [], 'assignees': []},
+                ])):
+            result = self.connector.live_list_issues(repo='acme/widgets')
+
+        self.assertEqual(result.data['count'], 1)
+        self.assertEqual(result.data['pull_requests_excluded'], 1)
+
+    def test_create_repo_splits_a_slash_into_organisation_and_name(self):
+        with mock.patch.object(
+                self.connector, 'request_json',
+                return_value=(201, {'full_name': 'acme-org/new-repo',
+                                    'html_url': 'https://github.com/acme-org/new-repo',
+                                    'private': True})) as fake:
+            result = self.connector.live_create_repo(name='acme-org/new-repo')
+
+        self.assertTrue(result.ok)
+        self.assertIn('/orgs/acme-org/repos', fake.call_args.args[0])
+
+    def test_create_repo_without_an_organisation_targets_the_user(self):
+        with mock.patch.object(
+                self.connector, 'request_json',
+                return_value=(201, {'full_name': 'me/solo', 'html_url': '',
+                                    'private': True})) as fake:
+            self.connector.live_create_repo(name='solo')
+
+        self.assertIn('/user/repos', fake.call_args.args[0])
+
+    def test_update_repo_writes_topics_through_the_separate_endpoint(self):
+        calls = []
+
+        def fake_api(path, *, method='GET', payload=None, params=None):
+            calls.append((path, method, payload))
+            return 200, {'html_url': '', 'private': False}
+
+        with mock.patch.object(self.connector, '_api', side_effect=fake_api):
+            result = self.connector.live_update_repo(repo='acme/widgets',
+                                                      topics='ai, workforce')
+
+        self.assertIn('topics', result.data['changed'])
+        topic_calls = [call for call in calls if call[0].endswith('/topics')]
+        self.assertEqual(len(topic_calls), 1)
+        self.assertEqual(topic_calls[0][1], 'PUT')
+        self.assertEqual(topic_calls[0][2]['names'], ['ai', 'workforce'])
+
+    def test_delete_repo_refuses_a_bare_name_even_in_live_mode(self):
+        result = self.connector.live_delete_repo(repo='just-a-name')
+        self.assertFalse(result.ok)
+
+    def test_delete_repo_calls_the_delete_endpoint(self):
+        with mock.patch.object(self.connector, 'request_json',
+                               return_value=(204, {})) as fake:
+            result = self.connector.live_delete_repo(repo='acme/scratch')
+
+        self.assertTrue(result.ok)
+        self.assertEqual(fake.call_args.kwargs['method'], 'DELETE')
+
+    def test_read_file_detects_binary_content_rather_than_inventing_text(self):
+        import base64
+        binary = base64.b64encode(b'\x00\x01\x02binary-ish').decode('ascii')
+        with mock.patch.object(self.connector, 'request_json',
+                               return_value=(200, {'content': binary, 'size': 12})):
+            result = self.connector.live_read_file(repo='acme/widgets', path='logo.png')
+
+        self.assertTrue(result.ok)
+        self.assertTrue(result.data['is_binary'])
+        self.assertEqual(result.data['content'], '')
+
+    # -- error translation -----------------------------------------------------
+
+    def test_get_repo_raises_with_the_advice_when_the_token_is_invalid(self):
+        error = urllib.error.HTTPError('url', 401, 'Unauthorized', {}, io.BytesIO(b'{}'))
+        with mock.patch.object(self.connector, 'request_json', side_effect=error):
+            with self.assertRaises(RuntimeError) as failure:
+                self.connector.live_get_repo(repo='acme/widgets')
+        self.assertIn('expired or been revoked', str(failure.exception))
+
+    def test_401_advice_names_the_token(self):
+        error = urllib.error.HTTPError('url', 401, 'Unauthorized', {}, io.BytesIO(b'{}'))
+        advice = self.connector._advise(error, '/repos/acme/widgets')
+        self.assertIn('personal access token', advice)
+
+    def test_403_rate_limit_is_distinguished_from_a_plain_403(self):
+        rate = urllib.error.HTTPError('url', 403, 'Forbidden', {},
+                                      io.BytesIO(b'API rate limit exceeded'))
+        self.assertIn('rate limit', self.connector._advise(rate, '/repos/acme/widgets').lower())
+
+        permission = urllib.error.HTTPError('url', 403, 'Forbidden', {},
+                                            io.BytesIO(b'no access for this token'))
+        self.assertIn('lacks permission',
+                     self.connector._advise(permission, '/repos/acme/widgets'))
+
+    def test_404_names_the_repository(self):
+        error = urllib.error.HTTPError('url', 404, 'Not Found', {}, io.BytesIO(b'{}'))
+        advice = self.connector._advise(error, '/repos/acme/private-thing')
+        self.assertIn('acme/private-thing', advice)
+
+    def test_410_points_at_disabled_issues(self):
+        error = urllib.error.HTTPError('url', 410, 'Gone', {}, io.BytesIO(b'{}'))
+        advice = self.connector._advise(error, '/repos/acme/widgets/issues')
+        self.assertIn('issues are disabled', advice)
+
+    def test_422_surfaces_the_response_body(self):
+        error = urllib.error.HTTPError('url', 422, 'Unprocessable Entity', {},
+                                       io.BytesIO(b'{"message":"label does not exist"}'))
+        advice = self.connector._advise(error, '/repos/acme/widgets/issues')
+        self.assertIn('label does not exist', advice)
+
+
+class GitHubDeveloperToolsTests(TestCase):
+    """The agent-facing tools built on the GitHub connector.
+
+    Reads act at once. Writes -- filing or changing an issue, creating,
+    updating or deleting a repository -- only ever queue a ProposedAction;
+    approving it is what the executor and the connector actually run.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user('devtools', 'devtools@example.com',
+                                              'pw-devtools-12345')
+        agent_engine.ensure_workspace_for_user(self.user)
+        self.developer = AIAgent.objects.get(agent_type='developer')
+        self.ctx = tools.ToolContext(user=self.user, agent=self.developer)
+
+    def _run(self, tool_name, **arguments):
+        return tools.run(tool_name, self.ctx, arguments)
+
+    def _approve(self, result):
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+        outcome = approvals.approve(action, self.user)
+        action.refresh_from_db()
+        return action, outcome
+
+    # -- reads act at once -------------------------------------------------
+
+    def test_list_github_issues_reports_the_demo_backlog(self):
+        result = self._run('dev.list_github_issues', repo='acme/platform')
+        self.assertTrue(result.ok)
+        self.assertTrue(result.demo)
+        self.assertGreater(result.data['count'], 0)
+
+    def test_list_github_issues_without_a_repository_asks_for_one(self):
+        result = self._run('dev.list_github_issues')
+        self.assertFalse(result.ok)
+        self.assertIn('Which repository', result.text)
+
+    def test_get_github_issue_reads_the_full_body(self):
+        result = self._run('dev.get_github_issue', repo='acme/platform', number=201)
+        self.assertTrue(result.ok)
+        self.assertIn('Export', result.text)
+
+    def test_read_repository_file_reads_the_readme(self):
+        result = self._run('dev.read_repository_file', repo='acme/platform',
+                           path='README.md')
+        self.assertTrue(result.ok)
+        self.assertIn('Acme', result.text)
+
+    def test_search_repository_finds_a_match(self):
+        result = self._run('dev.search_repository', repo='acme/platform', query='migration')
+        self.assertTrue(result.ok)
+
+    def test_analyse_pull_request_flags_a_large_risky_change(self):
+        result = self._run('dev.analyse_pull_request', repo='acme/platform', number=214)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['verdict'], 'request_changes')
+        self.assertEqual(CodeReview.objects.count(), 1)
+
+    def test_analyse_pull_request_approves_a_small_clean_change(self):
+        result = self._run('dev.analyse_pull_request', repo='acme/platform', number=215)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data['verdict'], 'approve')
+
+    # -- issue writes only queue a proposal ---------------------------------
+
+    def test_create_github_issue_only_queues_a_proposal(self):
+        result = self._run('dev.create_github_issue', title='Bug found while debugging',
+                           repo='acme/platform')
+        self.assertTrue(result.awaiting_approval)
+        self.assertEqual(ExternalIssue.objects.count(), 0)
+
+    def test_approving_create_github_issue_files_it_and_records_it(self):
+        proposed = self._run('dev.create_github_issue', title='Bug found while debugging',
+                             repo='acme/platform')
+        action, outcome = self._approve(proposed)
+        self.assertTrue(outcome['ok'])
+        self.assertEqual(action.status, 'executed')
+        self.assertTrue(action.executed_in_demo)
+        self.assertEqual(ExternalIssue.objects.count(), 1)
+
+    def test_update_github_issue_needs_at_least_one_change(self):
+        result = self._run('dev.update_github_issue', number=201)
+        self.assertFalse(result.ok)
+        self.assertFalse(result.awaiting_approval)
+
+    def test_comment_on_github_issue_proposal_and_execution(self):
+        proposed = self._run('dev.comment_on_github_issue', number=201,
+                             body='Confirmed on staging.')
+        self.assertTrue(proposed.awaiting_approval)
+        action, outcome = self._approve(proposed)
+        self.assertTrue(outcome['ok'])
+        self.assertEqual(action.status, 'executed')
+
+    # -- repository administration ------------------------------------------
+
+    def test_create_repository_proposal_keeps_the_full_name_for_the_connector_to_split(self):
+        # The tool itself does not split owner/name apart -- that split is a
+        # connector-level concern (see GitHubConnectorLiveTests), because it
+        # decides which API path the create call uses. The proposal payload
+        # carries the name through unchanged.
+        result = self._run('dev.create_repository', name='my-org/new-tool')
+        self.assertTrue(result.awaiting_approval)
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+        self.assertEqual(action.payload['name'], 'my-org/new-tool')
+        self.assertEqual(action.payload['organisation'], '')
+        self.assertTrue(action.payload['private'])
+        self.assertEqual(action.risk, 'medium')
+
+    def test_create_repository_needs_a_name(self):
+        result = self._run('dev.create_repository', name='')
+        self.assertFalse(result.ok)
+        self.assertFalse(result.awaiting_approval)
+
+    def test_approving_create_repository_calls_the_connector(self):
+        proposed = self._run('dev.create_repository', name='new-tool')
+        action, outcome = self._approve(proposed)
+        self.assertTrue(outcome['ok'])
+        self.assertTrue(action.executed_in_demo)
+        self.assertEqual(ExternalIssue.objects.filter(reference='repository').count(), 1)
+
+    def test_update_repository_needs_at_least_one_field(self):
+        result = self._run('dev.update_repository', repo='acme/platform')
+        self.assertFalse(result.ok)
+        self.assertFalse(result.awaiting_approval)
+
+    def test_update_repository_proposal_and_execution(self):
+        proposed = self._run('dev.update_repository', repo='acme/platform',
+                             description='Updated description')
+        self.assertTrue(proposed.awaiting_approval)
+        action, outcome = self._approve(proposed)
+        self.assertTrue(outcome['ok'])
+        self.assertEqual(action.status, 'executed')
+
+    def test_delete_repository_requires_the_full_owner_name(self):
+        result = self._run('dev.delete_repository', repo='justname', confirm='justname')
+        self.assertFalse(result.ok)
+        self.assertFalse(result.awaiting_approval)
+
+    def test_delete_repository_confirmation_must_match(self):
+        result = self._run('dev.delete_repository', repo='acme/scratch',
+                           confirm='acme/somewhere-else')
+        self.assertFalse(result.ok)
+        self.assertFalse(result.awaiting_approval)
+
+    def test_delete_repository_proposal_is_high_risk(self):
+        result = self._run('dev.delete_repository', repo='acme/scratch',
+                           confirm='acme/scratch', reason='No longer needed')
+        self.assertTrue(result.awaiting_approval)
+        action = ProposedAction.objects.get(pk=result.pending_action_id)
+        self.assertEqual(action.risk, 'high')
+
+    def test_approving_delete_repository_deletes_it_and_records_it(self):
+        proposed = self._run('dev.delete_repository', repo='acme/scratch',
+                             confirm='acme/scratch')
+        action, outcome = self._approve(proposed)
+        self.assertTrue(outcome['ok'])
+        self.assertTrue(action.executed_in_demo)
+        issue = ExternalIssue.objects.get(reference='repository')
+        self.assertEqual(issue.issue_status, 'simulated')

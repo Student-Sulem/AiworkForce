@@ -3814,14 +3814,22 @@ def analyse_pull_request(ctx, number, repo=''):
             ok=False, error=detail.error,
             text=f'Could not read pull request {number}: {detail.error}')
 
-    data = detail.data or {}
+    raw = detail.data or {}
+    if raw.get('found') is False:
+        return ToolResult(ok=True, demo=detail.demo,
+                          text=detail.summary or f'Pull request {number} was not found.',
+                          data=raw)
+
+    # get_pull_request nests the actual row under 'pull_request' -- the top
+    # level only carries repository and demo bookkeeping.
+    data = raw.get('pull_request') if isinstance(raw.get('pull_request'), dict) else raw
     title = _first(data, 'title', default=f'Pull request {number}')
     changed = _as_int(_first(data, 'changed_files', 'files_changed', default=0)) or 0
     additions = _as_int(_first(data, 'additions', default=0)) or 0
     deletions = _as_int(_first(data, 'deletions', default=0)) or 0
     mergeable = _first(data, 'mergeable_state', 'mergeable', default='unknown')
-    head = _first(data, 'head', 'head_ref', default='')
-    base = _first(data, 'base', 'base_ref', default='')
+    head = _first(data, 'head_branch', 'head', 'head_ref', default='')
+    base = _first(data, 'base_branch', 'base', 'base_ref', default='')
 
     files_result = _call('github', 'list_pull_request_files', repo=repo,
                          number=_as_int(number), limit=100)
@@ -3881,7 +3889,7 @@ def analyse_pull_request(ctx, number, repo=''):
                else ('comment' if findings else 'approve'))
 
     review = CodeReview.objects.create(
-        repository=_first(data, 'repo', 'repository', default=repo),
+        repository=_first(raw, 'repo', 'repository', default=repo),
         pull_request_number=str(number),
         title=f'Review of #{number}: {title}'[:300],
         summary=(f'{changed} files changed, +{additions}/-{deletions}. '
@@ -4532,12 +4540,21 @@ def get_github_issue(ctx, number, repo=''):
         return ToolResult(ok=False, error=result.error,
                           text=f'Could not read issue #{number}: {result.error}')
 
-    data = result.data or {}
+    raw = result.data or {}
+    if raw.get('found') is False:
+        return ToolResult(ok=True, demo=result.demo,
+                          text=result.summary or f'Issue #{number} was not found.',
+                          data=dict(raw, repository=target, simulated=result.demo))
+
+    # get_issue nests the actual row under 'issue' -- the top level only
+    # carries repository and demo bookkeeping.
+    data = raw.get('issue') if isinstance(raw.get('issue'), dict) else raw
+    assignees = data.get('assignees') or []
     marker = ' (simulated)' if result.demo else ''
     lines = [
         f"#{data.get('number', number)} {data.get('title', '')}{marker}",
         f"  state: {data.get('state', 'unknown')}"
-        + (f" | assignee: {data.get('assignee')}" if data.get('assignee') else ''),
+        + (f" | assignee: {', '.join(assignees)}" if assignees else ''),
     ]
     if data.get('labels'):
         lines.append('  labels: ' + ', '.join(str(t) for t in data['labels']))
