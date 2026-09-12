@@ -60,6 +60,7 @@ other. Every simulated result is flagged and labelled as such.
 """
 
 import base64
+import urllib.parse
 import hashlib
 import urllib.error
 
@@ -331,7 +332,26 @@ class JiraConnector(Connector):
     # -- plumbing ----------------------------------------------------------
 
     def _site(self):
-        site = str(self.setting('site_url', '') or '').strip().rstrip('/')
+        """The Atlassian site origin, however the URL was pasted.
+
+        People copy this out of the browser address bar, which means it
+        routinely arrives carrying the whole session query string:
+
+            https://acme.atlassian.net?continue=%2Fwelcome&atlOrigin=eyJpIjoi...
+
+        Appending a REST path to that produces a URL where the path lands
+        after the query and the call fails in a way that looks like a
+        credential problem rather than a typing one. So everything after the
+        host is discarded, along with the trailing path fragments people
+        habitually include.
+        """
+        raw = str(self.setting('site_url', '') or '').strip()
+        if not raw:
+            return ''
+
+        parsed = urllib.parse.urlsplit(raw if '//' in raw else f'https://{raw}')
+        site = f'{parsed.scheme or "https"}://{parsed.netloc}'.rstrip('/')
+
         # A site pasted with /wiki or /jira on the end is a common paste error.
         for suffix in ('/wiki', '/jira', '/browse'):
             if site.endswith(suffix):

@@ -24,6 +24,7 @@ seed needs its source row. Everything else is independent.
 """
 
 from django.db import transaction
+from django.db.models import Q
 
 from . import workforce
 from .models import AIAgent, LLMModel, LLMProvider, Profile
@@ -62,11 +63,16 @@ PROVIDER_BLUEPRINT = [
         ],
     },
     {
+        # NVIDIA's catalogue endpoint lists far more models than a given
+        # account may actually call, and it keeps listing models after they
+        # are retired. So the starter entries here are the ones observed to
+        # answer, and `manage.py verify_models` exists to find out which of
+        # the rest work on your account rather than guessing from the listing.
         'provider_key': 'nvidia',
         'display_name': 'NVIDIA NIM',
         'models': [
-            ('meta/llama-3.3-70b-instruct', 'Llama 3.3 70B Instruct'),
-            ('mistralai/mistral-small-24b-instruct', 'Mistral Small 24B'),
+            ('nvidia/nemotron-3.5-lightning-30b-a3b', 'Nemotron 3.5 Lightning 30B'),
+            ('nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B'),
         ],
     },
     {
@@ -104,12 +110,110 @@ def ensure_providers(owner=None):
 # The model a new employee is given, in order of preference. Named here rather
 # than inferred, because "the first row the database happens to return" is not
 # a choice, and an employee's default model is worth choosing.
+#
+# Every entry has to be a model that can hold a tool-calling conversation. That
+# is a stronger requirement than being a good chat model, and it is the reason
+# this list is short: an employee whose model ignores the tools parameter
+# produces a confident paragraph about what it would have done and changes
+# nothing, which is the most misleading failure the platform has.
 PREFERRED_MODEL_IDS = (
+    # NVIDIA NIM. Lightning first: it calls tools reliably and answers in a
+    # third of the time the 120B takes, and a thirty-second wait per chat turn
+    # is the difference between a usable interface and an abandoned one.
+    'nvidia/nemotron-3.5-lightning-30b-a3b',
+    'nvidia/nemotron-3-super-120b-a12b',
+    # OpenRouter free tier.
     'deepseek/deepseek-chat-v3.1:free',
     'meta-llama/llama-3.3-70b-instruct:free',
-    'meta/llama-3.3-70b-instruct',
+    'qwen/qwen-2.5-72b-instruct:free',
+    # Local Ollama.
     'llama3.1',
+    'qwen2.5',
 )
+
+# What a provider says when a model is listed in its catalogue but can no
+# longer be called. Both happen constantly: a provider retires a model without
+# removing it from /models, or the account simply has no entitlement to it.
+# Matched against the message from llm_client._classify_error.
+_GONE_MARKERS = ('retired', 'not found', '404', 'no longer available',
+                 'does not exist', 'decommissioned')
+
+
+def model_is_gone(message):
+    """Whether a failure means this model will never work, rather than not now.
+
+    The distinction matters. A timeout or a 503 is worth retrying; a retired
+    model is worth disabling, because every future turn will fail the same way
+    and the employee will silently fall back forever.
+    """
+    lowered = str(message or '').lower()
+    return any(marker in lowered for marker in _GONE_MARKERS)
+
+
+def disable_model(model, reason=''):
+    """Switch off a model the provider will not serve, and rehouse its employees.
+
+    WHY THIS EXISTS
+    ---------------
+    A provider's catalogue endpoint lists models the account cannot actually
+    call. On the machine this was written for, 62 of 68 listed chat models
+    answered 404 or "retired", including the one two employees had been
+    assigned. Those two employees fell back on every single turn, and the only
+    visible symptom was a reply that began "No language model is configured" --
+    while the Configurations page cheerfully reported the provider online,
+    because the provider *was* online. The model was not.
+
+    So a dead model is disabled at the point of discovery and every employee
+    holding it is moved to one that works. Disabling rather than deleting keeps
+    the row, so the Configurations page can show what happened.
+    """
+    if model is None:
+        return 0
+
+    if model.is_enabled:
+        model.is_enabled = False
+        model.save(update_fields=['is_enabled'])
+
+    replacement = default_model()
+    if replacement is not None and replacement.pk == model.pk:
+        replacement = None
+
+    moved = AIAgent.objects.filter(llm_model=model)
+    count = moved.count()
+    moved.update(llm_model=replacement)
+
+    from . import audit
+    audit.log(
+        'model.disabled', category='system', status='failed',
+        target_app=model.provider.label, object_label=model.model_id,
+        message=(f'{model.model_id} was disabled: {reason or "the provider will not "
+                 "serve it"}. '
+                 + (f'{count} employee(s) moved to {replacement.model_id}.'
+                    if replacement is not None and count
+                    else f'{count} employee(s) now have no model.')),
+        detail={'model': model.model_id, 'reason': str(reason)[:300],
+                'replacement': replacement.model_id if replacement else None,
+                'agents_moved': count})
+    return count
+
+
+def repair_agent_models():
+    """Move every employee off a disabled or missing model. Idempotent.
+
+    Runs from the sync_workforce and verify_models commands. Returns the number
+    of employees rehoused, so a command can say whether it changed anything.
+    """
+    replacement = default_model()
+    if replacement is None:
+        return 0
+
+    broken = AIAgent.objects.filter(
+        Q(llm_model__isnull=True)
+        | Q(llm_model__is_enabled=False)
+        | Q(llm_model__provider__is_enabled=False))
+    count = broken.count()
+    broken.update(llm_model=replacement)
+    return count
 
 
 def default_model():
@@ -170,7 +274,13 @@ def ensure_agents(owner=None):
                 'system_prompt': workforce.full_prompt(row),
                 'llm_model': model,
                 'temperature': row.get('temperature', 0.7),
-                'max_tokens': row.get('max_tokens', 1200),
+                # Reasoning models spend output tokens on their visible working
+                # before the answer begins. At 1200 a research turn that had
+                # read four documents emitted the word "Here" and hit the
+                # ceiling, which reads as a broken employee rather than a
+                # budget that was too small. A blueprint row may still override
+                # it per employee.
+                'max_tokens': row.get('max_tokens', 3000),
                 'user': owner,
             },
         )

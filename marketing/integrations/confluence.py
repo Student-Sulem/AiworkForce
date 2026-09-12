@@ -63,6 +63,7 @@ prose with stable ids. Every simulated result is flagged.
 """
 
 import base64
+import urllib.parse
 import hashlib
 import html
 import urllib.error
@@ -511,7 +512,29 @@ class ConfluenceConnector(Connector):
     # -- plumbing ----------------------------------------------------------
 
     def _site(self):
-        return str(self.setting('site_url', '') or '').strip().rstrip('/')
+        """The Atlassian site origin, however the URL was pasted.
+
+        People copy this out of the browser address bar, which means it
+        routinely arrives carrying the whole session query string:
+
+            https://acme.atlassian.net?continue=%2Fwelcome&atlOrigin=eyJpIjoi...
+
+        Appending a REST path to that produces a URL where the path lands
+        after the query and the call fails in a way that looks like a
+        credential problem rather than a typing one. So everything after the
+        host is discarded, along with the trailing path fragments people
+        habitually include.
+        """
+        raw = str(self.setting('site_url', '') or '').strip()
+        if not raw:
+            return ''
+
+        parsed = urllib.parse.urlsplit(raw if '//' in raw else f'https://{raw}')
+        site = f'{parsed.scheme or "https"}://{parsed.netloc}'.rstrip('/')
+
+        # Confluence lives under /wiki, so it is added back rather than
+        # stripped -- but only once, however the person typed it.
+        return site + '/wiki'
 
     def _headers(self):
         email = str(self.setting('email', '') or '')
@@ -539,6 +562,26 @@ class ConfluenceConnector(Connector):
             body = ''
         code = exc.code
         if code == 401:
+            # Confluence answers 401 for two entirely different situations, and
+            # telling them apart matters more than the status code does.
+            #
+            # A genuinely bad credential comes back as JSON. A site that simply
+            # has no Confluence on it comes back as an HTML sign-in page,
+            # because Atlassian redirects to login rather than answering the
+            # API at all. Reporting the second as "check your token" sends
+            # somebody to re-make a token that was never the problem -- which
+            # is exactly what happened here, with the same token returning 200
+            # from Jira on the same site.
+            looks_like_login = ('<html' in body.lower()
+                                or 'text/html' in str(
+                                    exc.headers.get('Content-Type', '')).lower())
+            if looks_like_login:
+                return ('Confluence answered with a sign-in page rather than the '
+                        'API (401), which almost always means Confluence is not '
+                        'activated on this Atlassian site. If Jira works with the '
+                        'same token, that is the cause. Add Confluence to the site '
+                        'from admin.atlassian.com, or the app switcher in Jira -- '
+                        'the free tier is enough -- then try again.')
             return ('Confluence rejected the credentials (401). Check the '
                     'account email matches the account that created the API '
                     'token, and that the token has not been revoked.')

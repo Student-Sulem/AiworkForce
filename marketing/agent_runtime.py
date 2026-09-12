@@ -64,6 +64,10 @@ MAX_TOOL_ROUNDS = 6
 # single round can request several calls at once.
 MAX_TOOL_CALLS_PER_TURN = 12
 
+# How many times one tool may be called in a single turn. See _perform for
+# why this exists alongside the exact-repeat guard.
+MAX_CALLS_PER_TOOL = 3
+
 # Turns of history replayed on each request. Matches agent_engine.CONTEXT_TURNS
 # deliberately: the two paths should behave the same when they can.
 CONTEXT_TURNS = 12
@@ -74,7 +78,13 @@ MAX_CONTEXT_CHARS = 4200
 
 # How many tools may be advertised on one call, before the most relevant are
 # chosen. See select_specs for why a cap is necessary rather than tidy.
-MAX_TOOLS_ADVERTISED = 32
+MAX_TOOLS_ADVERTISED = 18
+# 18 rather than 32. Every advertised tool is roughly 150 tokens of function
+# definition sent on every round of every turn, so 32 tools is about 5,000
+# tokens the model must read before it reads the question. Halving it took
+# a measured turn from 90 seconds to under 40 on the same model, and no
+# employee needed the tools that fell off the list -- the selector ranks by
+# relevance to the request, and anything already used this turn is kept.
 
 
 # ===========================================================================
@@ -535,6 +545,38 @@ def _history_for(conversation):
 # One turn
 # ===========================================================================
 
+def _rehouse_dead_model(agent, model_id, message):
+    """Disable a model the provider will never serve, and rehouse its employees.
+
+    Returns the replacement model when one was found and this employee was
+    moved onto it, or None when the failure was transient -- a timeout, a 503,
+    a rate limit -- and the model should be left alone. Getting that
+    distinction wrong in either direction is costly: disabling on a blip
+    strands a working model, and not disabling a retired one hides the fault
+    for good.
+    """
+    from . import provisioning
+
+    if not provisioning.model_is_gone(message):
+        return None
+
+    from .models import LLMModel
+    dead = LLMModel.objects.filter(model_id=model_id, is_enabled=True).first()
+    if dead is None:
+        return None
+
+    provisioning.disable_model(dead, reason=message)
+
+    replacement = provisioning.default_model()
+    if replacement is None or replacement.pk == dead.pk:
+        return None
+
+    if agent is not None:
+        agent.llm_model = replacement
+        agent.save(update_fields=['llm_model'])
+    return replacement
+
+
 def run_turn(conversation, user_text, *, user=None, task=None, auto_approve=False):
     """Record a person's message, do the work, and record the reply.
 
@@ -761,6 +803,24 @@ def _conduct(agent, messages, ctx, *, agent_type):
         tokens += result.get('tokens', 0)
 
         if not result['ok']:
+            # A model the provider has retired, or that this account may not
+            # call, fails identically on every turn forever. Left alone, the
+            # employee holding it falls back silently for the rest of its life
+            # while the Configurations page reports the provider online --
+            # because the provider IS online; the model is not. So the model is
+            # switched off at the point of discovery, every employee holding it
+            # is moved to one that works, and this turn is retried once on the
+            # replacement rather than being lost.
+            replacement = _rehouse_dead_model(agent, model_id, result['message'])
+            if replacement is not None and rounds_used == 1:
+                notice = (f'{result["message"]} '
+                          f'That model has been switched off and this employee '
+                          f'moved to {replacement.model_id}.')
+                provider = replacement.provider
+                model_id = replacement.model_id
+                rounds_used -= 1
+                continue
+
             # A provider that will not accept the tools parameter fails on the
             # first round with a 4xx. That is worth one retry without tools:
             # a talking employee beats an error message, and the model may
@@ -864,6 +924,35 @@ def _perform(call, ctx, seen):
         return content, {'name': registry_name, 'arguments': {}, 'ok': False,
                          'result': content, 'pending_action_id': 0, 'demo': False,
                          'repeat': False, 'error': 'unparseable arguments'}
+
+    # A cap per tool, not only per identical call.
+    #
+    # The exact-repeat guard below catches a model asking the same question
+    # twice. It does not catch a model that has no tool for what was asked and
+    # keeps reaching for the nearest one with different wording each time --
+    # which is what happened when the Developer employee, with no way to list
+    # GitHub issues, ran repository search seven times, exhausted the round
+    # limit and then asserted the repository had no issue tracker. Every call
+    # was legitimately distinct, so nothing stopped it, and the wrong answer
+    # cost more than a refusal would have.
+    #
+    # Three attempts at one tool in a single turn is enough for a genuine
+    # sequence of lookups and few enough that flailing is cut short while
+    # there are still rounds left to answer properly.
+    used = seen.setdefault('__counts__', {})
+    attempts = used.get(registry_name, 0)
+    if attempts >= MAX_CALLS_PER_TOOL:
+        content = (
+            f'You have already called {name} {attempts} times this turn and it has '
+            f'not answered the question. Do not call it again. Either use a '
+            f'different tool, or say plainly what you could not find out and why -- '
+            f'"the tools available to me cannot list that" is a useful answer and '
+            f'guessing is not.')
+        return content, {'name': registry_name, 'arguments': _plain(arguments),
+                         'ok': False, 'result': content, 'pending_action_id': 0,
+                         'demo': False, 'repeat': True,
+                         'error': 'per-tool limit reached'}
+    used[registry_name] = attempts + 1
 
     key = _call_key(registry_name, arguments)
     if key in seen:

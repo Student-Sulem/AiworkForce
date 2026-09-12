@@ -3794,6 +3794,47 @@ def _read_failure(what, result):
               f'Check the integration on the Integrations page.'))
 
 
+def default_repository():
+    """The repository configured on the GitHub integration, or ''.
+
+    WHY A TOOL NEEDS THIS
+
+    A connector already falls back to its configured default when a tool
+    passes an empty repository, so execution worked. What did not work was
+    everything a person sees before execution: a read tool refused with
+    "Which repository?" while a perfectly good default sat in the settings,
+    and an issue proposal showed a reviewer a blank repository field, so the
+    one question they most need answered -- where is this going -- had no
+    answer on the approval card.
+
+    So the default is resolved here, in the tool, rather than being left to
+    the connector.
+    """
+    try:
+        from ..integrations import get_integration
+    except Exception:  # noqa: BLE001 -- a missing registry is not a failed tool
+        return ''
+    row = get_integration('github')
+    if row is None:
+        return ''
+    return str((row.config or {}).get('default_repository') or '').strip()
+
+
+def resolve_repository(repo='', work_item=None):
+    """Which repository a GitHub call should use, in order of specificity.
+
+    An explicit argument wins, then the project the work item belongs to,
+    then the integration's own default.
+    """
+    named = str(repo or '').strip()
+    if named:
+        return named
+    project = getattr(work_item, 'project', None)
+    if project is not None and getattr(project, 'repository', ''):
+        return str(project.repository).strip()
+    return default_repository()
+
+
 @tool(name='eng.read_repository_issues', title='Read repository issues',
       description='Read the issues on a GitHub repository. Read-only.',
       group='Tracking', agent_types=('engineering_manager',), integration='github',
@@ -3803,8 +3844,11 @@ def _read_failure(what, result):
                       limit=_i('Most issues to return. Default 20.')))
 def read_repository_issues(ctx, repo, state='open', limit=20):
     """What GitHub currently holds, so a plan can be reconciled against it."""
-    if not str(repo or '').strip():
-        message = "Which repository? Pass repo as 'owner/name'."
+    repo = resolve_repository(repo)
+    if not repo:
+        message = ("Which repository? Pass repo as 'owner/name', or set a default "
+                   "repository on the GitHub integration so it does not have to be "
+                   "named every time.")
         return ToolResult(ok=False, error=message, text=message)
 
     count = max(1, min(_as_int(limit) or 20, 100))
@@ -3843,8 +3887,11 @@ def read_repository_issues(ctx, repo, state='open', limit=20):
                       limit=_i('Most to return. Default 20.')))
 def read_pull_requests(ctx, repo, state='open', limit=20):
     """Open pull requests, which are the work that is nearly done."""
-    if not str(repo or '').strip():
-        message = "Which repository? Pass repo as 'owner/name'."
+    repo = resolve_repository(repo)
+    if not repo:
+        message = ("Which repository? Pass repo as 'owner/name', or set a default "
+                   "repository on the GitHub integration so it does not have to be "
+                   "named every time.")
         return ToolResult(ok=False, error=message, text=message)
 
     count = max(1, min(_as_int(limit) or 20, 100))

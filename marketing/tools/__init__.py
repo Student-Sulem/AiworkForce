@@ -20,6 +20,7 @@ from .base import (Proposal, Tool, ToolContext, ToolResult, all_tools, editable,
 # here is the only thing that decides registration order, and nothing else
 # depends on it.
 from . import (  # noqa: E402,F401
+    comms,
     developer,
     engineering,
     hr,

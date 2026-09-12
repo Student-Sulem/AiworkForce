@@ -74,6 +74,82 @@
             {% endfor %}
         </div>
 
+        {% comment %}
+            ACTIONS THIS REPLY PUT IN THE QUEUE.
+
+            When an employee calls a tool that reaches outside the company, the
+            work is done and a ProposedAction is waiting. Before this block the
+            only sign of that was a sentence in the reply text, and the only way
+            to release it was to leave the conversation, find the Approvals page
+            and find the row -- which is a lot of walking to press one button on
+            something you are already looking at.
+
+            So the queued action is shown here with its recipient, its target
+            application and its risk, and approving it is one click. Nothing is
+            weakened by that: the same ProposedAction is written, the same
+            pipeline executes it, and the same audit entries are recorded. What
+            is removed is the walk, not the review -- the payload is on screen,
+            which is more than the Approvals list shows.
+
+            Editing still happens on the detail page, because a textarea inside
+            a chat bubble is a worse place to rewrite an email than a page built
+            for it.
+        {% endcomment %}
+        {% with queued=message.proposed_actions.all %}
+        {% if queued %}
+        <div class="msg__queued">
+            {% for action in queued %}
+            <div class="queued-action queued-action--{{ action.status }}"
+                 data-queued-action="{{ action.pk }}">
+                <span class="queued-action__icon" aria-hidden="true">
+                    <i class="fa-solid {{ action.icon }}"></i>
+                </span>
+                <span class="queued-action__body">
+                    <span class="queued-action__title">{{ action.title }}</span>
+                    <span class="queued-action__meta">
+                        {{ action.target_app }}
+                        &middot; <span class="risk-pill risk-pill--{{ action.risk }}">{{ action.get_risk_display }}</span>
+                        {% if action.integration and action.integration.effective_mode == 'demo' %}
+                        &middot; <span class="mode-pill mode-pill--demo">will be simulated</span>
+                        {% endif %}
+                        {% if action.was_edited %}&middot; edited by a reviewer{% endif %}
+                    </span>
+                </span>
+
+                <span class="queued-action__decide">
+                    {% if action.is_pending %}
+                        {% if perms.marketing.approve_proposedaction %}
+                        <button class="btn btn--primary btn--sm" type="button"
+                                data-approve-action="{{ action.pk }}">
+                            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                            Approve and send
+                        </button>
+                        <button class="btn btn--ghost btn--sm" type="button"
+                                data-reject-action="{{ action.pk }}"
+                                title="Reject this action">
+                            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                            <span class="u-sr-only">Reject</span>
+                        </button>
+                        {% else %}
+                        <span class="badge badge--warning">Waiting for a reviewer</span>
+                        {% endif %}
+                        <a href="{% url 'action_detail' action.pk %}"
+                           class="btn btn--secondary btn--sm">Review or edit</a>
+                    {% else %}
+                        {% include 'partials/_status_badge.html' with status=action.status label=action.get_status_display %}
+                        {% if action.executed_in_demo %}
+                        <span class="mode-pill mode-pill--demo">simulated</span>
+                        {% endif %}
+                        <a href="{% url 'action_detail' action.pk %}"
+                           class="btn btn--ghost btn--sm">Open</a>
+                    {% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
         <div class="msg__actions">
             {% with approval=message.submitted_approval %}
             {% if approval %}

@@ -3636,6 +3636,47 @@ def list_my_work_items(ctx, assignee_name='', project_id=None, status='', limit=
                         for i in rows]})
 
 
+def default_repository():
+    """The repository configured on the GitHub integration, or ''.
+
+    WHY A TOOL NEEDS THIS
+
+    A connector already falls back to its configured default when a tool
+    passes an empty repository, so execution worked. What did not work was
+    everything a person sees before execution: a read tool refused with
+    "Which repository?" while a perfectly good default sat in the settings,
+    and an issue proposal showed a reviewer a blank repository field, so the
+    one question they most need answered -- where is this going -- had no
+    answer on the approval card.
+
+    So the default is resolved here, in the tool, rather than being left to
+    the connector.
+    """
+    try:
+        from ..integrations import get_integration
+    except Exception:  # noqa: BLE001 -- a missing registry is not a failed tool
+        return ''
+    row = get_integration('github')
+    if row is None:
+        return ''
+    return str((row.config or {}).get('default_repository') or '').strip()
+
+
+def resolve_repository(repo='', work_item=None):
+    """Which repository a GitHub call should use, in order of specificity.
+
+    An explicit argument wins, then the project the work item belongs to,
+    then the integration's own default.
+    """
+    named = str(repo or '').strip()
+    if named:
+        return named
+    project = getattr(work_item, 'project', None)
+    if project is not None and getattr(project, 'repository', ''):
+        return str(project.repository).strip()
+    return default_repository()
+
+
 @tool(name='dev.read_repository_file',
       title='Read a file from a repository',
       description=('Read one file out of a GitHub repository, so code can be '
@@ -3917,7 +3958,7 @@ def create_github_issue(ctx, title, body='', repo='', labels=None, assignees=Non
     if work_item_id and item is None:
         return _no_item(work_item_id)
 
-    target = repo.strip() or (item.project.repository if item is not None else '')
+    target = resolve_repository(repo, item)
     full_body = _issue_body(body, artifact_id, item)
 
     return Proposal(
@@ -4392,3 +4433,400 @@ def _execute_upload_documentation(action):
         ok=True, demo=result.demo,
         text=result.summary or f'Uploaded {payload.get("name")}.',
         data=dict(result.data or {}, simulated=result.demo))
+
+
+# ===========================================================================
+# READING WHAT IS ALREADY TRACKED
+#
+# These were missing, and the gap produced a bad answer rather than an error.
+# The employee could create, update and comment on a GitHub issue but had no
+# way to LIST one. Asked "what are the open issues", it had nothing to call,
+# so it reached for the nearest thing -- repository search -- ran it seven
+# times with different phrasings, exhausted the round limit, and concluded
+# that the repository had no issue tracker. Every step of that was reasonable
+# given the tools it held; the fault was the tools it held.
+#
+# A capability that can write to something must be able to read it back.
+# ===========================================================================
+
+@tool(name='dev.list_github_issues',
+      title='List GitHub issues',
+      description=('List the issues on a GitHub repository, open or closed. Use '
+                   'this whenever somebody asks what issues exist, what is open, '
+                   'or whether something is already filed -- do NOT search the '
+                   'repository code for that, because issues are not in the code. '
+                   'Reading changes nothing, so this happens at once.'),
+      group='Issue Tracking', agent_types=('developer',), integration='github',
+      icon='fa-list-ul', reads_only=True,
+      parameters=_obj(
+          repo=_s('The repository as owner/name. Uses the configured default '
+                  'when empty.'),
+          state=_enum('Which issues to return.', ('open', 'closed', 'all')),
+          labels=_s('Only issues carrying these labels, comma separated.'),
+          limit=_i('How many to return. Default 20.'),
+      ))
+def list_github_issues(ctx, repo='', state='open', labels='', limit=20):
+    """List the issues on a repository, so nothing has to be inferred."""
+    target = resolve_repository(repo)
+    if not target:
+        message = ("Which repository? Pass repo as 'owner/name', or set a default "
+                   "repository on the GitHub integration.")
+        return ToolResult(ok=False, error=message, text=message)
+
+    result = _call('github', 'list_issues', repo=target,
+                   state=state or 'open', limit=max(1, _as_int(limit) or 20),
+                   labels=labels or '')
+    if not result.ok:
+        return ToolResult(
+            ok=False, error=result.error,
+            text=f'Could not read the issues on {target}: {result.error}')
+
+    issues = _first(result.data, 'issues', 'items', default=[]) or []
+    marker = ' (simulated -- GitHub is in demo mode)' if result.demo else ''
+
+    if not issues:
+        return ToolResult(
+            ok=True, demo=result.demo,
+            text=(f'{target} has no {state} issues{marker}. That is the real '
+                  f'answer from the issue tracker, not an inference.'),
+            data={'repository': target, 'issues': [], 'count': 0,
+                  'simulated': result.demo})
+
+    lines = [f'{len(issues)} {state} issue(s) in {target}{marker}:']
+    for row in issues[:40]:
+        if not isinstance(row, dict):
+            lines.append(f'  {row}')
+            continue
+        tags = ', '.join(str(t) for t in (row.get('labels') or []))
+        lines.append(
+            f"  #{row.get('number', '?')} {row.get('title', '(no title)')}"
+            + (f" [{tags}]" if tags else '')
+            + (f" -- {row.get('assignee')}" if row.get('assignee') else ''))
+
+    return ToolResult(ok=True, demo=result.demo, text='\n'.join(lines),
+                      data={'repository': target, 'issues': issues[:40],
+                            'count': len(issues), 'simulated': result.demo})
+
+
+@tool(name='dev.get_github_issue',
+      title='Read one GitHub issue',
+      description=('Read a single GitHub issue in full, including its body and '
+                   'state. Use it before commenting on or updating an issue, so '
+                   'the comment answers what the issue actually says.'),
+      group='Issue Tracking', agent_types=('developer',), integration='github',
+      icon='fa-circle-info', reads_only=True,
+      parameters=_obj(
+          required=('number',),
+          number=_s('The issue number.'),
+          repo=_s('The repository as owner/name.'),
+      ))
+def get_github_issue(ctx, number, repo=''):
+    """Read one issue, so a reply is grounded in what it says."""
+    target = resolve_repository(repo)
+    if not target:
+        message = "Which repository? Pass repo as 'owner/name'."
+        return ToolResult(ok=False, error=message, text=message)
+
+    result = _call('github', 'get_issue', repo=target, number=_as_int(number))
+    if not result.ok:
+        return ToolResult(ok=False, error=result.error,
+                          text=f'Could not read issue #{number}: {result.error}')
+
+    data = result.data or {}
+    marker = ' (simulated)' if result.demo else ''
+    lines = [
+        f"#{data.get('number', number)} {data.get('title', '')}{marker}",
+        f"  state: {data.get('state', 'unknown')}"
+        + (f" | assignee: {data.get('assignee')}" if data.get('assignee') else ''),
+    ]
+    if data.get('labels'):
+        lines.append('  labels: ' + ', '.join(str(t) for t in data['labels']))
+    if data.get('body'):
+        lines.extend(['', str(data['body'])[:3000]])
+
+    return ToolResult(ok=True, demo=result.demo, text='\n'.join(lines),
+                      data=dict(data, repository=target, simulated=result.demo))
+
+
+# ===========================================================================
+# REPOSITORY ADMINISTRATION
+#
+# Creating and updating a repository sit alongside every other write in this
+# module: the tool prepares the action, a person approves it, the executor
+# performs it.
+#
+# DELETING ONE DOES NOT SIT ALONGSIDE THEM, and it is worth saying why in the
+# code rather than only in a docstring somewhere.
+#
+# Every other action this platform can take is recoverable. A wrong email can
+# be followed by a correction, a wrong issue can be closed, a wrong Jira
+# transition can be transitioned back. Deleting a repository destroys work
+# that may exist nowhere else, and GitHub's restore window is short and not
+# guaranteed. Approval alone is a weak guard against it, because approving is
+# one click and the thing most likely to go wrong is a reviewer approving
+# quickly without reading which repository is named.
+#
+# So deletion carries three guards that nothing else here has:
+#
+#   1. It never falls back to the configured default repository. Every other
+#      tool treats an empty repo as "use the default". Here that would be a
+#      way to destroy the project's own repository because an argument went
+#      missing between the model and the tool.
+#   2. The caller must pass `confirm` matching the full owner/name exactly,
+#      which is the same shape of guard GitHub's own interface uses.
+#   3. It is risk high, so the approval card warns and the chat button asks
+#      for confirmation before it will even submit.
+#
+# None of that makes deletion safe. It makes it deliberate, which is the most
+# a tool layer can honestly offer.
+# ===========================================================================
+
+@tool(name='dev.create_repository',
+      title='Create a GitHub repository',
+      description=('Create a new GitHub repository. Prepared for approval; '
+                   'nothing is created until somebody approves it. Requires a '
+                   'token with Administration write, which a token scoped to a '
+                   'single repository does not have.'),
+      group='Repository Administration', agent_types=('developer',),
+      integration='github', requires_approval=True, risk='medium',
+      icon='fa-folder-plus',
+      parameters=_obj(
+          required=('name',),
+          name=_s('The repository name, without the owner. Lower case with '
+                  'hyphens is the convention.'),
+          description=_s('One line describing what it is for.'),
+          private=_s('true for a private repository, false for public. '
+                     'Defaults to true.'),
+          organisation=_s('Create it under this organisation instead of the '
+                          'authenticated user.'),
+          auto_init=_s('true to add an initial README so the repository can be '
+                       'cloned at once. Defaults to true.'),
+          gitignore_template=_s('A .gitignore template name, e.g. Python.'),
+          license_template=_s('A licence template name, e.g. mit.'),
+      ))
+def create_repository(ctx, name, description='', private='true',
+                      organisation='', auto_init='true',
+                      gitignore_template='', license_template=''):
+    """Prepare a new repository. Creating it needs a person."""
+    clean = str(name or '').strip().strip('/')
+    if not clean:
+        return ToolResult(ok=False, error='no name',
+                          text='A repository name is required.')
+
+    owner = str(organisation or '').strip()
+    full = clean if '/' in clean else (f'{owner}/{clean}' if owner else clean)
+    is_private = str(private).strip().lower() not in ('false', 'no', '0', 'off')
+
+    return Proposal(
+        title=f'Create GitHub repository {full}',
+        summary=(f'Would create {full} as a '
+                 f'{"private" if is_private else "public"} repository'
+                 + (f' under the {owner} organisation' if owner else
+                    ' under your own account') + '.'),
+        payload={'name': clean, 'description': str(description),
+                 'private': is_private, 'organisation': owner,
+                 'auto_init': str(auto_init).strip().lower() not in
+                              ('false', 'no', '0', 'off'),
+                 'gitignore_template': str(gitignore_template),
+                 'license_template': str(license_template)},
+        editable_fields=[
+            editable('name', 'Repository name'),
+            editable('description', 'Description', 'longtext', rows=3),
+            editable('private', 'Private'),
+            editable('organisation', 'Organisation'),
+            editable('gitignore_template', 'Gitignore template'),
+            editable('license_template', 'Licence'),
+        ],
+        risk='medium', integration_key='github',
+        confirmation=(f'Prepared the creation of {full} and placed it in the '
+                      f'approval queue. Nothing exists on GitHub yet.'))
+
+
+@executor('dev.create_repository')
+def _execute_create_repository(action):
+    payload = action.payload or {}
+    result = _call('github', 'create_repo',
+                   name=payload.get('name', ''),
+                   description=payload.get('description', ''),
+                   private=payload.get('private', True),
+                   organisation=payload.get('organisation', ''),
+                   auto_init=payload.get('auto_init', True),
+                   gitignore_template=payload.get('gitignore_template', ''),
+                   license_template=payload.get('license_template', ''))
+    if not result.ok:
+        return ToolResult(ok=False, error=result.error,
+                          text=f'The repository was not created: {result.error}')
+
+    data = result.data or {}
+    issue = ExternalIssue.objects.create(
+        system='github', container=str(data.get('repository', ''))[:200],
+        reference='repository', title=f'Created {data.get("repository", "")}',
+        body=payload.get('description', ''),
+        issue_status='simulated' if result.demo else 'open',
+        url=str(data.get('url', ''))[:400],
+        agent=action.agent, action=action)
+    return ToolResult(ok=True, demo=result.demo,
+                      text=f'{result.summary} Recorded as #{issue.pk}.',
+                      data=dict(data, record_id=issue.pk))
+
+
+@tool(name='dev.update_repository',
+      title='Update a GitHub repository',
+      description=('Change a repository\'s description, homepage, topics, '
+                   'default branch, visibility or archived state. Prepared for '
+                   'approval. Requires a token with Administration write.'),
+      group='Repository Administration', agent_types=('developer',),
+      integration='github', requires_approval=True, risk='medium',
+      icon='fa-folder-tree',
+      parameters=_obj(
+          repo=_s('The repository as owner/name. Uses the configured default '
+                  'when empty.'),
+          description=_s('A new one-line description.'),
+          homepage=_s('A URL for the repository homepage.'),
+          topics=_s('Comma separated topics, replacing the existing set.'),
+          default_branch=_s('The branch to make default. It must already exist.'),
+          private=_s('true to make it private, false to make it public.'),
+          archived=_s('true to archive it, making it read only.'),
+      ))
+def update_repository(ctx, repo='', description='', homepage='', topics='',
+                      default_branch='', private='', archived=''):
+    """Prepare a change to a repository's settings. Applying it needs a person."""
+    target = resolve_repository(repo)
+    if not target:
+        message = ("Which repository? Pass repo as 'owner/name', or set a default "
+                   "repository on the GitHub integration.")
+        return ToolResult(ok=False, error=message, text=message)
+
+    payload = {'repo': target}
+    wanted = []
+    for key, value in (('description', description), ('homepage', homepage),
+                       ('default_branch', default_branch)):
+        if str(value).strip():
+            payload[key] = str(value).strip()
+            wanted.append(key)
+    if str(topics).strip():
+        payload['topics'] = str(topics)
+        wanted.append('topics')
+    for key, value in (('private', private), ('archived', archived)):
+        if str(value).strip():
+            payload[key] = str(value).strip().lower() in ('true', 'yes', '1', 'on')
+            wanted.append(key)
+
+    if not wanted:
+        message = (f'Nothing to change on {target}. Give at least one of: '
+                   f'description, homepage, topics, default_branch, private, '
+                   f'archived.')
+        return ToolResult(ok=False, error='no fields', text=message)
+
+    note = ''
+    if 'private' in payload and payload['private'] is False:
+        note = (' Making a repository public exposes its entire history, '
+                'including anything committed to it in the past.')
+    if payload.get('archived'):
+        note += ' Archiving makes the repository read only.'
+
+    return Proposal(
+        title=f'Update GitHub repository {target}',
+        summary=f'Would change {", ".join(wanted)} on {target}.{note}',
+        payload=payload,
+        editable_fields=[editable(k, k.replace('_', ' ').capitalize())
+                         for k in payload if k != 'repo'],
+        risk='medium', integration_key='github',
+        confirmation=(f'Prepared the change to {target} and placed it in the '
+                      f'approval queue. Nothing has changed on GitHub.'))
+
+
+@executor('dev.update_repository')
+def _execute_update_repository(action):
+    payload = dict(action.payload or {})
+    repo = payload.pop('repo', '')
+    result = _call('github', 'update_repo', repo=repo, **payload)
+    if not result.ok:
+        return ToolResult(ok=False, error=result.error,
+                          text=f'The repository was not updated: {result.error}')
+    return ToolResult(ok=True, demo=result.demo, text=result.summary,
+                      data=result.data or {})
+
+
+@tool(name='dev.delete_repository',
+      title='Delete a GitHub repository',
+      description=(
+          'PERMANENTLY delete a GitHub repository and everything in it. This '
+          'destroys work that may exist nowhere else and cannot be undone from '
+          'here. Only ever call it when somebody has named the exact repository '
+          'and made clear they want it deleted -- never to tidy up, never on '
+          'your own initiative, and never by inferring which repository was '
+          'meant. You must pass confirm with the full owner/name, exactly as '
+          'given. The configured default repository is deliberately not used. '
+          'Prepared for approval; nothing is deleted until somebody approves it. '
+          'Requires a token with the delete_repo scope.'),
+      group='Repository Administration', agent_types=('developer',),
+      integration='github', requires_approval=True, risk='high',
+      icon='fa-trash',
+      parameters=_obj(
+          required=('repo', 'confirm'),
+          repo=_s('The repository to delete, as owner/name. Required in full.'),
+          confirm=_s('The same owner/name again, as a confirmation that this '
+                     'specific repository is meant.'),
+          reason=_s('Why it is being deleted. Recorded on the approval.'),
+      ))
+def delete_repository(ctx, repo, confirm, reason=''):
+    """Prepare a permanent deletion. Only a person can release it."""
+    target = str(repo or '').strip().rstrip('/')
+    given = str(confirm or '').strip().rstrip('/')
+
+    if '/' not in target:
+        message = ('Deleting a repository needs the full owner/name, for example '
+                   'Student-Sulem/AiworkForce. The configured default repository '
+                   'is deliberately not used for deletion.')
+        return ToolResult(ok=False, error='incomplete name', text=message)
+
+    if given.lower() != target.lower():
+        message = (f'The confirmation did not match. To delete {target}, pass '
+                   f'confirm as exactly {target}. If you are not certain which '
+                   f'repository is meant, ask rather than guessing -- this cannot '
+                   f'be undone.')
+        return ToolResult(ok=False, error='confirmation mismatch', text=message)
+
+    return Proposal(
+        title=f'DELETE GitHub repository {target}',
+        summary=(f'Would PERMANENTLY delete {target}, including its code, '
+                 f'issues, pull requests and history. This cannot be undone from '
+                 f'this platform. GitHub offers a short restore window at '
+                 f'github.com/settings/repositories.'
+                 + (f' Reason given: {reason}' if reason else
+                    ' No reason was given.')),
+        payload={'repo': target, 'reason': str(reason)},
+        editable_fields=[editable('reason', 'Reason', 'longtext', rows=3)],
+        risk='high', integration_key='github',
+        confirmation=(f'Prepared the deletion of {target} and placed it in the '
+                      f'approval queue. It has NOT been deleted. Read the '
+                      f'repository name on the approval card before releasing it.'))
+
+
+@executor('dev.delete_repository')
+def _execute_delete_repository(action):
+    payload = action.payload or {}
+    target = str(payload.get('repo', '')).strip()
+
+    # Checked again at execution, not only at proposal. A reviewer can edit a
+    # payload, and the one field that must never become something else between
+    # being read and being acted on is which repository is destroyed.
+    if '/' not in target:
+        return ToolResult(
+            ok=False, error='incomplete name',
+            text='The repository name was incomplete, so nothing was deleted.')
+
+    result = _call('github', 'delete_repo', repo=target)
+    if not result.ok:
+        return ToolResult(ok=False, error=result.error,
+                          text=f'The repository was not deleted: {result.error}')
+
+    issue = ExternalIssue.objects.create(
+        system='github', container=target[:200], reference='repository',
+        title=f'Deleted {target}', body=str(payload.get('reason', '')),
+        issue_status='simulated' if result.demo else 'closed',
+        agent=action.agent, action=action)
+    return ToolResult(ok=True, demo=result.demo,
+                      text=f'{result.summary} Recorded as #{issue.pk}.',
+                      data=dict(result.data or {}, record_id=issue.pk))

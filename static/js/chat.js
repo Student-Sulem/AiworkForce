@@ -235,6 +235,87 @@
     });
 
     /* Approve and send, in one click, without leaving the conversation. */
+    /* --- Approving a queued action without leaving the conversation ------ */
+
+    /* An employee that used a tool reaching outside the company has already
+       done the work; a ProposedAction is waiting. Releasing it used to mean
+       leaving the thread, opening the Approvals page and finding the row. The
+       payload is on screen here, so the decision can be made here.
+
+       Nothing is weakened by that. This posts to the same endpoint the
+       Approvals page posts to, so the same pipeline approves, executes and
+       audits it. Editing still sends you to the detail page, which is the
+       right place to rewrite an email. */
+
+    function settleQueuedAction(row, action, fallbackMessage) {
+      var decide = row.querySelector('.queued-action__decide');
+      if (!decide) { return; }
+
+      var label = (action && action.status_label) || fallbackMessage || 'Done';
+      var status = (action && action.status) || 'executed';
+      var parts = ['<span class="badge badge--' +
+                   (status === 'rejected' || status === 'failed' ? 'danger' : 'success') +
+                   '">' + App.escapeHtml(label) + '</span>'];
+
+      if (action && action.executed_in_demo) {
+        parts.push('<span class="mode-pill mode-pill--demo">simulated</span>');
+      }
+      if (action && action.url) {
+        parts.push('<a href="' + action.url +
+                   '" class="btn btn--ghost btn--sm">Open</a>');
+      }
+      decide.innerHTML = parts.join(' ');
+      row.className = 'queued-action queued-action--' + status;
+    }
+
+    function decideQueuedAction(button, decision, reason) {
+      var row = button.closest('[data-queued-action]');
+      var id = button.dataset.approveAction || button.dataset.rejectAction;
+      var original = button.innerHTML;
+
+      button.disabled = true;
+      button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
+
+      App.postJSON('/api/actions/decide/', {
+        action_id: id,
+        decision: decision,
+        reason: reason || ''
+      }).then(function (data) {
+        if (row) { settleQueuedAction(row, data.action, data.message); }
+        App.toast(data.message, data.status === 'success' ? 'success' : 'warning');
+
+        var badge = document.getElementById('navActionBadge');
+        if (badge && typeof data.pending_count === 'number') {
+          badge.textContent = data.pending_count;
+          badge.hidden = data.pending_count === 0;
+        }
+      }).catch(function (error) {
+        button.disabled = false;
+        button.innerHTML = original;
+        App.toast(error.message || 'The action could not be decided.', 'danger');
+      });
+    }
+
+    App.on('click', '[data-approve-action]', function () {
+      var row = this.closest('[data-queued-action]');
+      var title = row ? (row.querySelector('.queued-action__title') || {}).textContent : '';
+      /* A high-risk action reaches somebody outside the company, so it gets a
+         confirmation. One click should be short, not unguarded. */
+      var risky = row && row.querySelector('.risk-pill--high');
+      if (risky && !window.confirm('Approve and carry out:\n\n' +
+                                   (title || 'this action').trim() +
+                                   '\n\nThis reaches someone outside the company.')) {
+        return;
+      }
+      decideQueuedAction(this, 'approved');
+    });
+
+    App.on('click', '[data-reject-action]', function () {
+      var reason = window.prompt('Why are you rejecting this? The reason is recorded.');
+      if (!reason || !reason.trim()) { return; }
+      decideQueuedAction(this, 'rejected', reason.trim());
+    });
+
     App.on('click', '[data-send-now]', function () {
       var button = this;
       var article = button.closest('.msg');

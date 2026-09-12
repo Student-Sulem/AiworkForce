@@ -312,7 +312,16 @@ LOGOUT_REDIRECT_URL = 'landing'
 # there would silently fall back to templates and make a working API key look
 # broken.
 LLM_HTTP_TIMEOUT = 8      # connection tests and model listings
-LLM_CHAT_TIMEOUT = 60     # generating a reply
+LLM_CHAT_TIMEOUT = 150    # generating a reply
+#
+# 150, not 60. An employee's turn is not one generation: the model is asked,
+# a tool runs, the result goes back, and it is asked again. With a reasoning
+# model the final round alone can take a minute, because such a model spends
+# output tokens on its visible working before the answer begins. At 60 the
+# platform threw that work away and fell back to reporting the raw tool
+# result, which looked like a broken employee rather than a budget that was
+# too small. Lower it if you use a fast hosted model and want to fail sooner.
+
 
 # API KEYS
 # --------

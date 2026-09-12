@@ -23,3 +23,10 @@ Thumbs.db
 
 # Collected static files, if collectstatic is ever run
 staticfiles/
+
+# Scratch output from the diagnostic management commands.
+alive_models.txt
+
+# NOTE: db.sqlite3 is listed above and is no longer tracked. It held live API
+# tokens in plain text -- GitHub push protection blocked a push because of it.
+# Each person seeds their own with: manage.py seed_workforce

@@ -559,7 +559,7 @@ def chat_with_tools(provider, model_id, messages, tools=None, temperature=0.7,
             _chat_url(provider), method='POST', headers=_build_headers(provider),
             payload=payload, timeout=timeout or _chat_timeout())
     except Exception as exc:  # noqa: BLE001 -- deliberately total
-        _connection_status, message = _classify_error(exc, provider_key)
+        _connection_status, message = _classify_error(exc, provider_key, timeout or _chat_timeout())
         failure['message'] = message
         return failure
 

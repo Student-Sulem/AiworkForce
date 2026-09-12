@@ -55,7 +55,10 @@ from django.conf import settings
 # request, so a short timeout there would silently fall back to templates and
 # make a perfectly good API key look broken.
 DEFAULT_TIMEOUT = 8
-DEFAULT_CHAT_TIMEOUT = 60
+DEFAULT_CHAT_TIMEOUT = 120  # see the note above: a research turn that has
+                            # read several documents routinely needs more
+                            # than a minute, and timing out discards work
+                            # that was almost complete.
 USER_AGENT = 'AIWorkforce/1.0 (Django coursework project)'
 
 # OpenRouter asks callers to identify themselves. Both headers are optional but
@@ -207,7 +210,7 @@ def _http_json(url, *, method='GET', headers=None, payload=None, timeout=None):
         return response.status, (json.loads(raw) if raw.strip() else {})
 
 
-def _classify_error(exc, provider_key=''):
+def _classify_error(exc, provider_key='', timeout=None):
     """Turn any exception into (connection_status, human-readable message).
 
     HTTPError is checked before URLError because it is a subclass of it; the
@@ -232,7 +235,12 @@ def _classify_error(exc, provider_key=''):
         return 'error', 'TLS verification failed. Check the network or proxy settings.'
 
     if isinstance(exc, (socket.timeout, TimeoutError)):
-        return 'error', f'No response within {_timeout()} seconds.'
+        # The caller passes the budget it actually used. Without that this
+        # reported the metadata timeout for every failure, so a generation call
+        # that waited a full minute said "no response within 8 seconds" -- which
+        # sends whoever is diagnosing it looking for a network fault that is not
+        # there.
+        return 'error', f'No response within {timeout or _timeout()} seconds.'
 
     if isinstance(exc, urllib.error.URLError):
         message = f'Could not reach the provider: {exc.reason}.'
@@ -444,11 +452,32 @@ _MONOLOGUE_RE = re.compile(
     # Planning its own next move rather than making it. A finished email or
     # social post never narrates what it is about to do.
     r"|\bso I(?:'ll| will| should)\b"
+    # The first-person-plural planning voice. Seen in practice from the
+    # Nemotron reasoning models, which open with a whole paragraph of
+    # "We need to write a short LinkedIn post about..." before producing the
+    # post. Deliberately narrow: it matches the verbs of composing something,
+    # not "we need to" in general, because a genuine piece of marketing copy
+    # may well contain that phrase in its body.
+    r"|\bwe (?:need to|must|should) (?:write|produce|generate|create|output"
+    r"|draft|compose|answer|reply|respond|call|use)\b"
+    r"|\bI need to (?:write|produce|generate|create|output|draft|compose)\b"
     r"|\bmy planned (?:response|reply|answer)\b"
     r"|\b(?:best|safer) (?:path|approach|option)\s*:"
     r"|^\s*(?:alternative|solution|wait|hmm|ah)\b\s*[:!,.]"
     r"|\bdouble-?checking\b"
-    r"|\blet me (?:unpack|re-?read)\b",
+    # "Let me parse the 5 documents:" -- the model narrating its own next
+    # step before taking it. Restricted to verbs of working rather than "let
+    # me know", which is ordinary polite prose and must survive.
+    r"|\blet me (?:unpack|re-?read|parse|read|check|look|see|go through"
+    r"|work through|start by|think|analyse|analyze|summarise|summarize)\b"
+    # NOTE: there was a rule here matching a line beginning "Step 1", "First,"
+    # or "Now I". It was removed after it stripped a perfectly good answer --
+    # "Step 1 of onboarding is the contract, which HR sends on day minus
+    # three" -- down to nothing. An onboarding checklist, a runbook and a set
+    # of reproduction steps all legitimately open that way, so the rule
+    # destroyed more real answers than it caught monologues. A pattern here
+    # has to be specific to the act of narrating, not to the shape of a list.
+    r"|\bbefore I (?:answer|write|reply|respond)\b",
     re.IGNORECASE | re.MULTILINE)
 
 # Below this, a trailing block is more likely to be a stray closing remark than

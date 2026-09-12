@@ -684,3 +684,91 @@
 }
 
 .integration-strip__name { flex: 1 1 auto; min-width: 0; font-weight: var(--fw-medium); }
+
+/* ==========================================================================
+   A QUEUED ACTION, SHOWN INSIDE THE CONVERSATION
+
+   When an employee's reply put something in the approval queue, the row sits
+   under that reply rather than only on the Approvals page. The reviewer is
+   already looking at the work; making them go and find it elsewhere is how a
+   queue stops being read.
+   ========================================================================== */
+
+.msg__queued {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin: var(--sp-3) 0 var(--sp-1);
+}
+
+.queued-action {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    padding: var(--sp-3);
+    border: 1px solid var(--color-warning-border);
+    border-left: 3px solid var(--color-warning);
+    border-radius: var(--r-md);
+    background: var(--color-warning-soft);
+    font-size: var(--fs-sm);
+}
+
+/* Once decided, the row stops shouting for attention. */
+.queued-action--executed,
+.queued-action--approved {
+    border-color: var(--color-success-border);
+    border-left-color: var(--color-success);
+    background: var(--color-success-soft);
+}
+
+.queued-action--rejected,
+.queued-action--cancelled,
+.queued-action--failed {
+    border-color: var(--color-border);
+    border-left-color: var(--color-neutral);
+    background: var(--color-surface-2);
+}
+
+.queued-action__icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+}
+
+.queued-action__body {
+    flex: 1 1 220px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.queued-action__title {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+}
+
+.queued-action__meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
+    color: var(--color-text-muted);
+}
+
+.queued-action__decide {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+}

@@ -440,6 +440,13 @@ class GitHubConnector(Connector):
         'list_issues', 'get_issue', 'list_pull_requests', 'get_pull_request',
         'list_pull_request_files', 'get_repo', 'read_file', 'search_code',
         'list_wiki', 'list_commits',
+        # Repository administration. These need far more from the token than
+        # everything above: Administration write for create and update, and
+        # the delete_repo scope for delete. A fine-grained token scoped to one
+        # repository -- which is what the setup guidance recommends -- cannot
+        # do any of them, and will answer 403 or 404. That is the correct
+        # outcome for a token that was deliberately kept narrow.
+        'create_repo', 'update_repo', 'delete_repo',
     )
 
     # -- plumbing ----------------------------------------------------------
@@ -816,6 +823,122 @@ class GitHubConnector(Connector):
              f'default branch {row["default_branch"]}, {row["stars"]} star(s).'),
             {'repository': row})
 
+    # -- repository administration -----------------------------------------
+    #
+    # Creating and updating a repository are ordinary write operations.
+    # DELETING one is not, and it is treated differently at every layer above
+    # this: the tool is risk high, it refuses to fall back to the configured
+    # default repository, and it requires the full owner/name to be typed as a
+    # confirmation. None of that lives here, because a connector's job is to
+    # speak the API faithfully -- but it is worth knowing while reading this
+    # method that GitHub deletion is immediate.
+
+    def live_create_repo(self, name='', description='', private=True,
+                         organisation='', auto_init=True, gitignore_template='',
+                         license_template='', homepage=''):
+        clean = str(name or '').strip()
+        if not clean:
+            return self.failure('A repository name is required.')
+        if '/' in clean:
+            # A full owner/name was passed where a bare name belongs. Split it
+            # rather than creating a repository with a slash in its title.
+            organisation, _, clean = clean.rpartition('/')
+
+        payload = {
+            'name': clean,
+            'description': str(description or '')[:350],
+            'private': _as_bool(private, True),
+            'auto_init': _as_bool(auto_init, True),
+        }
+        if homepage:
+            payload['homepage'] = str(homepage)
+        if gitignore_template:
+            payload['gitignore_template'] = str(gitignore_template)
+        if license_template:
+            payload['license_template'] = str(license_template)
+
+        owner = str(organisation or '').strip()
+        path = f'/orgs/{owner}/repos' if owner else '/user/repos'
+
+        _status, data = self._api(path, method='POST', payload=payload)
+        full = data.get('full_name') or (f'{owner}/{clean}' if owner else clean)
+        visibility = 'private' if payload['private'] else 'public'
+        return self.ok(
+            f'Created {full} as a {visibility} repository. '
+            f'{data.get("html_url", "")}'.strip(),
+            {'repository': full, 'url': data.get('html_url', ''),
+             'private': bool(data.get('private', payload['private'])),
+             'default_branch': data.get('default_branch', ''),
+             'created': True})
+
+    def live_update_repo(self, repo='', name='', description='', homepage='',
+                         private=None, archived=None, default_branch='',
+                         has_issues=None, topics=None):
+        repo = self._repo(repo)
+        if not repo:
+            return self._no_repo()
+
+        payload = {}
+        if name:
+            payload['name'] = str(name).strip()
+        if description != '':
+            payload['description'] = str(description)[:350]
+        if homepage:
+            payload['homepage'] = str(homepage)
+        if private is not None:
+            payload['private'] = _as_bool(private, False)
+        if archived is not None:
+            payload['archived'] = _as_bool(archived, False)
+        if default_branch:
+            payload['default_branch'] = str(default_branch).strip()
+        if has_issues is not None:
+            payload['has_issues'] = _as_bool(has_issues, True)
+
+        data = {}
+        changed = []
+        if payload:
+            _status, data = self._api(f'/repos/{repo}', method='PATCH',
+                                      payload=payload)
+            changed = sorted(payload)
+
+        # Topics are a separate endpoint on GitHub, not a field on the repo.
+        if topics is not None:
+            source = topics if isinstance(topics, (list, tuple)) \
+                else str(topics).split(',')
+            names = [str(t).strip().lower().replace(' ', '-')
+                     for t in source if str(t).strip()]
+            self._api(f'/repos/{repo}/topics', method='PUT',
+                      payload={'names': names})
+            changed.append('topics')
+
+        if not changed:
+            return self.ok(
+                f'Nothing was changed on {repo}: no fields were given.',
+                {'repository': repo, 'changed': []})
+
+        return self.ok(
+            f'Updated {repo}: {", ".join(changed)}.',
+            {'repository': repo, 'changed': changed,
+             'url': data.get('html_url', ''),
+             'private': bool(data.get('private', False))})
+
+    def live_delete_repo(self, repo=''):
+        # Deliberately no fallback to the configured default repository. Every
+        # other operation here treats an empty repo as "use the default", which
+        # is a convenience. For deletion it would be a way to destroy the
+        # project's own repository because an argument went missing.
+        target = str(repo or '').strip()
+        if not target or '/' not in target:
+            return self.failure(
+                'Deleting a repository requires the full owner/name, given '
+                'explicitly. The configured default is deliberately not used.')
+
+        self._api(f'/repos/{target}', method='DELETE')
+        return self.ok(
+            f'Deleted {target}. GitHub offers a short restore window at '
+            f'github.com/settings/repositories; after that it is gone.',
+            {'repository': target, 'deleted': True})
+
     def live_read_file(self, repo='', path='', ref=''):
         repo = self._repo(repo)
         if not repo:
@@ -1188,6 +1311,41 @@ class GitHubConnector(Connector):
              'additions': additions, 'deletions': deletions, 'files': rows,
              'simulated': True})
 
+    def demo_create_repo(self, name='', description='', private=True,
+                         organisation='', **kwargs):
+        clean = str(name or 'new-repository').strip().strip('/')
+        owner = str(organisation or '').strip() or 'Student-Sulem'
+        full = clean if '/' in clean else f'{owner}/{clean}'
+        visibility = 'private' if _as_bool(private, True) else 'public'
+        return self.simulated(
+            f'Would create {full} as a {visibility} repository. '
+            f'Nothing was created on GitHub.',
+            {'repository': full, 'url': f'https://github.com/{full}',
+             'private': _as_bool(private, True), 'default_branch': 'main',
+             'created': False, 'simulated': True})
+
+    def demo_update_repo(self, repo='', **fields):
+        target = self._repo(repo) or 'acme/platform'
+        changed = sorted(k for k, v in fields.items() if v not in (None, ''))
+        if not changed:
+            return self.simulated(
+                f'Would change nothing on {target}: no fields were given.',
+                {'repository': target, 'changed': [], 'simulated': True})
+        return self.simulated(
+            f'Would update {target}: {", ".join(changed)}. '
+            f'Nothing was changed on GitHub.',
+            {'repository': target, 'changed': changed, 'simulated': True})
+
+    def demo_delete_repo(self, repo=''):
+        target = str(repo or '').strip()
+        if not target or '/' not in target:
+            return self.failure(
+                'Deleting a repository requires the full owner/name, given '
+                'explicitly. The configured default is deliberately not used.')
+        return self.simulated(
+            f'Would permanently delete {target}. Nothing was deleted on GitHub.',
+            {'repository': target, 'deleted': False, 'simulated': True})
+
     def demo_get_repo(self, repo=''):
         repo = self._demo_repo(repo)
         return self.simulated(
@@ -1376,3 +1534,21 @@ def _demo_pull_row(repo, item, detailed=False):
         row['size_warning'] = _size_warning(
             item['changed_files'], item['additions'] + item['deletions'])
     return row
+
+def _as_bool(value, default=False):
+    """A boolean from whatever a language model supplied.
+
+    Models send true, "true", "yes", 1 and "on" interchangeably, and a
+    repository's private flag is not a field to get wrong by treating
+    the string "false" as truthy.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ('true', 'yes', 'y', '1', 'on'):
+        return True
+    if text in ('false', 'no', 'n', '0', 'off'):
+        return False
+    return default
